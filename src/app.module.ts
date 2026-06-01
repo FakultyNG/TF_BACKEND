@@ -21,6 +21,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { CashDropModule } from "./cash-drop/cash-drop.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
 import { UploadsModule } from "./uploads/uploads.module";
+import { HealthModule } from "./health/health.module";
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { UploadsModule } from "./uploads/uploads.module";
     CashDropModule,
     WebhooksModule,
     UploadsModule,
+    HealthModule,
     AdminModule
   ]
 })

@@ -1,0 +1,62 @@
+services:
+  - type: web
+    name: tf-backend-dev
+    runtime: node
+    plan: free
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /api/v1/health
+    buildCommand: npm ci && npx prisma generate && npm run build
+    preDeployCommand: npx prisma migrate deploy
+    startCommand: npm run start:prod
+    envVars:
+      - key: NODE_ENV
+        value: development
+      - key: API_PREFIX
+        value: api/v1
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: JSON_BODY_LIMIT
+        value: 10mb
+      - key: FCM_ENABLED
+        value: "false"
+      - key: MOCK_OTP_CODE
+        value: "123456"
+      - key: ADMIN_PHONE_NUMBER
+        value: "2348000000000"
+      - key: ADMIN_PASSCODE
+        value: "12345"
+      - key: MOCK_NGN_FIXED_FEE
+        value: "100"
+      - key: MOCK_USD_RATE_NGN
+        value: "1650"
+      - key: MOCK_CNY_RATE_NGN
+        value: "230"
+      - key: MOCK_GIFT_CARD_USD_RATE_NGN
+        value: "1680"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tf-backend-postgres-dev
+          property: connectionString
+      - key: REDIS_URL
+        fromDatabase:
+          name: tf-backend-redis-dev
+          property: connectionString
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: ADMIN_JWT_SECRET
+        generateValue: true
+
+databases:
+  - name: tf-backend-postgres-dev
+    databaseName: tf_backend_dev
+    user: tf_backend_user
+    plan: free
+    postgresMajorVersion: "15"
+    ipAllowList: []
+  - name: tf-backend-redis-dev
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
