@@ -13,18 +13,14 @@ export class HealthController {
         success: true,
         message: "Service is healthy",
         data: {
-          status: "ok",
-          service: "tf-backend",
-          timestamp: "2026-06-01T12:00:00.000Z"
+          status: "ok"
         }
       }
     }
   })
   check() {
     return success("Service is healthy", {
-      status: "ok",
-      service: "tf-backend",
-      timestamp: new Date().toISOString()
+      status: "ok"
     });
   }
 }

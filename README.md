@@ -135,6 +135,18 @@ Swagger docs:
 http://localhost:4000/api/v1/docs
 ```
 
+Swagger exposure is controlled by environment variables:
+
+```env
+SWAGGER_ENABLED=true
+SWAGGER_BASIC_AUTH_ENABLED=false
+SWAGGER_USERNAME=
+SWAGGER_PASSWORD=
+ROOT_ROUTE_HINTS_ENABLED=true
+```
+
+For Render staging, use `SWAGGER_ENABLED=true`, `SWAGGER_BASIC_AUTH_ENABLED=true`, set a strong username/password, and set `ROOT_ROUTE_HINTS_ENABLED=false` if `NODE_ENV` is still `development`. For production, use `SWAGGER_ENABLED=false` and `ROOT_ROUTE_HINTS_ENABLED=false`. The public health endpoint remains available for platform checks, but it only returns `status: ok`.
+
 ## Development Notes
 
 - `MOCK_OTP_CODE` defaults to `123456` for local development.

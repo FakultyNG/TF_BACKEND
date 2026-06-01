@@ -30,7 +30,7 @@ http://localhost:4000/api/v1
 ## Staging
 
 ```text
-https://tf-backend-vizg.onrender.com/api/v1
+https://staging.transfaintel.xyz/api/v1
 
 ```
 

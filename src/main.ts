@@ -9,6 +9,12 @@ import { NextFunction, Request, Response, json, urlencoded } from "express";
 import { AppModule } from "./app.module";
 import { ApiErrorBody, success } from "./common/api-response";
 import { ApiExceptionFilter } from "./common/filters/api-exception.filter";
+import {
+  getRootRouteHintsEnabled,
+  getRootStatusData,
+  getSwaggerExposureOptions,
+  isSwaggerRequestAuthorized
+} from "./http-exposure.config";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
@@ -49,22 +55,43 @@ async function bootstrap() {
 
   app.getHttpAdapter().getInstance().get("/", (_request: Request, response: Response) => {
     response.json(
-      success("TF Backend API is running", {
-        service: "tf-backend",
-        docs: `/${apiPrefix}/docs`,
-        health: `/${apiPrefix}/health`
-      })
+      success(
+        "TF Backend API is running",
+        getRootStatusData(config.get<string>("NODE_ENV"), apiPrefix, getRootRouteHintsEnabled(config))
+      )
     );
   });
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle("TF Backend API")
-    .setDescription("TRANSFA mobile and admin backend APIs")
-    .setVersion("1.0")
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup(`${apiPrefix}/docs`, app, document);
+  const swaggerExposure = getSwaggerExposureOptions(config);
+  if (swaggerExposure.enabled) {
+    if (swaggerExposure.basicAuthEnabled) {
+      app.use(
+        [`/${apiPrefix}/docs`, `/${apiPrefix}/docs-json`, `/${apiPrefix}/docs-yaml`],
+        (request: Request, response: Response, next: NextFunction) => {
+          if (isSwaggerRequestAuthorized(request.headers.authorization, swaggerExposure)) {
+            next();
+            return;
+          }
+
+          response.setHeader("WWW-Authenticate", 'Basic realm="TF Backend API Docs"');
+          response.status(HttpStatus.UNAUTHORIZED).json({
+            success: false,
+            message: "Swagger documentation authentication required",
+            error: { code: "UNAUTHORIZED" }
+          });
+        }
+      );
+    }
+
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle("TF Backend API")
+      .setDescription("TRANSFA mobile and admin backend APIs")
+      .setVersion("1.0")
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup(`${apiPrefix}/docs`, app, document);
+  }
 
   await app.listen(config.get<number>("PORT", 4000), "0.0.0.0");
 }
