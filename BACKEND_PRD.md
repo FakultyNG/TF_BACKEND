@@ -24,6 +24,17 @@ Backend implementation must preserve the core product rule: even when the UI sho
 - Provide admin, compliance, reconciliation, and support visibility.
 - Support screen-derived product modules shown in Figma: CashDrop, support conversations, notifications, money limits, utility purchases, gift cards, transaction receipts, and legal/privacy content delivery.
 
+### 2.1 Backend Tech Stack
+
+- Node.js runtime.
+- NestJS application framework.
+- PostgreSQL relational database.
+- Prisma ORM and migration tooling.
+- Redis for caching, queues, rate limits, sessions, and idempotency locks.
+- JWT authentication with refresh token rotation.
+- Docker for local development, service packaging, and deployment portability.
+- Swagger/OpenAPI for API documentation, contract review, and client integration.
+
 ## 3. Core Product Rules
 
 1. Users only hold NGN wallet balances inside TRANSFA.
@@ -839,7 +850,10 @@ Observability:
 Infrastructure:
 
 - PostgreSQL for source-of-truth transactional data.
+- Prisma for schema management, migrations, type-safe database access, and transaction boundaries.
 - Redis for sessions, rate limits, idempotency locks, queues, and short-lived quote caches.
+- Docker for reproducible local services and deployment packaging.
+- Swagger/OpenAPI for generated API documentation and request/response contract visibility.
 - Background queue for provider calls, webhooks, notifications, and reconciliation.
 
 ## 14. Key Backend State Machines

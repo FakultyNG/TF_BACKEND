@@ -1,0 +1,679 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  active
+  suspended
+  disabled
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  SUPPORT
+  COMPLIANCE
+  FINANCE
+  SUPER_ADMIN
+}
+
+enum KycStatus {
+  not_started
+  pending
+  bvn_verified
+  verified
+  rejected
+}
+
+enum WalletStatus {
+  inactive
+  active
+}
+
+enum DvaStatus {
+  active
+  inactive
+  failed
+}
+
+enum LedgerEntryType {
+  credit
+  debit
+  reversal
+  adjustment
+}
+
+enum TransactionType {
+  wallet_funding
+  ngn_transfer
+  usd_transfer
+  cny_transfer
+  gift_card
+  bill_payment
+  fee
+  wallet_adjustment
+  reversal
+}
+
+enum TransactionStatus {
+  pending
+  processing
+  successful
+  failed
+  reversed
+}
+
+enum GiftCardProductStatus {
+  active
+  disabled
+}
+
+enum GiftCardPurchaseStatus {
+  processing
+  delivered
+  failed
+  reversed
+}
+
+enum AuthSessionStatus {
+  active
+  revoked
+  expired
+}
+
+enum SupportTicketStatus {
+  open
+  pending
+  closed
+  reopened
+}
+
+enum SupportMessageSenderType {
+  user
+  admin
+  system
+}
+
+enum BiometricMethod {
+  face_id
+  fingerprint
+  biometric
+  unknown
+}
+
+enum NotificationStatus {
+  draft
+  published
+  disabled
+}
+
+enum NotificationAudience {
+  all_users
+  specific_user
+  user_segment
+}
+
+enum CashDropProfileStatus {
+  active
+  disabled
+}
+
+model User {
+  id           String     @id @default(cuid())
+  phoneNumber  String     @unique
+  passcodeHash String
+  status       UserStatus @default(active)
+  role         UserRole   @default(USER)
+  walletStatus WalletStatus @default(inactive)
+  supportNotes String?
+  riskNotes    String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  profile      Profile?
+  kycRecords   KycRecord[]
+  authSessions AuthSession[]
+  auditLogs    AuditLog[]
+  wallet       Wallet?
+  dedicatedVirtualAccounts DedicatedVirtualAccount[]
+  transactions Transaction[]
+  walletLedger WalletLedger[]
+  giftCardPurchases GiftCardPurchase[]
+  updatedFeeConfigs FeeConfig[] @relation("FeeConfigUpdatedBy")
+  supportTickets SupportTicket[]
+  assignedSupportTickets SupportTicket[] @relation("AssignedSupportTickets")
+  trustedDevices TrustedDevice[]
+  notificationReceipts NotificationReceipt[]
+  targetedNotifications Notification[] @relation("NotificationTargetUser")
+  createdNotifications Notification[] @relation("NotificationCreatedBy")
+  cashDropProfile CashDropProfile?
+  recentBeneficiaries RecentBeneficiary[]
+  supportAttachments SupportAttachment[]
+  deviceTokens UserDeviceToken[]
+
+  @@index([phoneNumber])
+  @@index([role])
+}
+
+model Wallet {
+  id        String       @id @default(cuid())
+  userId    String       @unique
+  currency  String       @default("NGN")
+  balance   Int          @default(0)
+  status    WalletStatus @default(inactive)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ledger  WalletLedger[]
+
+  @@index([status])
+}
+
+model WalletLedger {
+  id            String          @id @default(cuid())
+  walletId      String
+  userId        String
+  transactionId String?
+  entryType     LedgerEntryType
+  amount        Int
+  balanceBefore Int
+  balanceAfter  Int
+  currency      String          @default("NGN")
+  reference     String?
+  description   String?
+  metadata      Json?
+  createdAt     DateTime        @default(now())
+
+  wallet      Wallet       @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@index([walletId])
+  @@index([userId])
+  @@index([transactionId])
+  @@index([reference])
+}
+
+model DedicatedVirtualAccount {
+  id             String    @id @default(cuid())
+  userId         String
+  provider       String
+  bankName       String
+  accountNumber  String
+  accountName    String
+  preferredBank  String?
+  status         DvaStatus @default(active)
+  providerReference String?
+  metadata       Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cashDropProfiles CashDropProfile[]
+
+  @@unique([provider, accountNumber])
+  @@index([userId])
+  @@index([status])
+}
+
+model CashDropProfile {
+  id              String                @id @default(cuid())
+  userId          String                @unique
+  dvaId           String
+  profileImageUrl String
+  fingerprint     String
+  fingerprintHash String
+  algorithm       String                @default("avg_hash_16x16_v1")
+  status          CashDropProfileStatus @default(active)
+  registeredAt    DateTime              @default(now())
+  disabledAt      DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dva  DedicatedVirtualAccount @relation(fields: [dvaId], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@index([dvaId])
+  @@map("CASH_DROP_profiles")
+}
+
+model Transaction {
+  id                String            @id @default(cuid())
+  userId            String
+  type              TransactionType
+  status            TransactionStatus @default(pending)
+  amount            Int
+  fee               Int               @default(0)
+  totalDebit        Int
+  currency          String            @default("NGN")
+  payoutAmount      Int?
+  payoutCurrency    String?
+  reference         String            @unique
+  provider          String?
+  providerReference String?
+  description       String?
+  narration         String?
+  idempotencyKey    String?           @unique
+  metadata          Json?
+  completedAt       DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ledger     WalletLedger[]
+  giftCardPurchase GiftCardPurchase?
+  supportTickets SupportTicket[]
+  recentBeneficiaries RecentBeneficiary[]
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model RecentBeneficiary {
+  id              String          @id @default(cuid())
+  userId          String
+  type            TransactionType
+  displayName     String
+  bankName        String?
+  bankCode        String?
+  accountNumber   String?
+  accountName     String?
+  supplierName    String?
+  supplierCountry String?
+  payoutCurrency  String?
+  beneficiaryJson Json?
+  paymentReference String?
+  transactionId   String?
+  dedupeKey       String          @unique
+  lastUsedAt      DateTime        @default(now())
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([type])
+  @@index([accountNumber])
+  @@index([displayName])
+  @@index([lastUsedAt])
+}
+
+model GiftCardProduct {
+  id        String                @id
+  name      String
+  currency  String
+  minAmount Int
+  maxAmount Int
+  status    GiftCardProductStatus @default(active)
+  provider  String                @default("mock")
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  purchases GiftCardPurchase[]
+}
+
+model GiftCardPurchase {
+  id             String                 @id @default(cuid())
+  userId         String
+  transactionId  String                 @unique
+  giftCardId     String
+  giftCardName   String
+  amount         Int
+  currency       String
+  status         GiftCardPurchaseStatus @default(processing)
+  recipientEmail String?
+  provider       String                 @default("mock")
+  providerReference String?
+  redemptionCode String?
+  metadata       Json?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction Transaction     @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  product     GiftCardProduct @relation(fields: [giftCardId], references: [id])
+
+  @@index([userId])
+  @@index([giftCardId])
+  @@index([status])
+}
+
+model ProviderLog {
+  id                String   @id @default(cuid())
+  provider          String
+  operation         String
+  requestReference  String?
+  providerReference String?
+  status            String
+  requestPayload    Json?
+  responsePayload   Json?
+  createdAt         DateTime @default(now())
+
+  @@index([provider])
+  @@index([operation])
+  @@index([requestReference])
+}
+
+model FeeConfig {
+  key         String   @id
+  config      Json
+  description String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  updatedBy User? @relation("FeeConfigUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+model Profile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  firstName       String?
+  lastName        String?
+  email           String?
+  dateOfBirth     DateTime?
+  gender          String?
+  country         String?
+  profileImageUrl String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SupportTicket {
+  id                   String              @id @default(cuid())
+  userId               String
+  subject              String
+  category             String              @default("general")
+  status               SupportTicketStatus @default(open)
+  assignedAdminId      String?
+  relatedTransactionId String?
+  metadata             Json?
+  closedAt             DateTime?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedAdmin      User?             @relation("AssignedSupportTickets", fields: [assignedAdminId], references: [id], onDelete: SetNull)
+  relatedTransaction Transaction?       @relation(fields: [relatedTransactionId], references: [id], onDelete: SetNull)
+  messages           SupportMessage[]
+  attachments        SupportAttachment[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([category])
+  @@index([assignedAdminId])
+  @@index([relatedTransactionId])
+  @@index([updatedAt])
+}
+
+model SupportMessage {
+  id            String                   @id @default(cuid())
+  ticketId      String
+  senderType    SupportMessageSenderType
+  senderId      String?
+  message       String
+  attachmentUrl String?
+  createdAt     DateTime                 @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  attachments SupportAttachment[]
+
+  @@index([ticketId])
+  @@index([senderType])
+  @@index([createdAt])
+}
+
+model SupportAttachment {
+  id              String   @id @default(cuid())
+  ticketId        String?
+  messageId       String?
+  userId          String
+  url             String
+  fileName        String
+  fileType        String
+  fileSize        Int
+  storageProvider String   @default("cloudinary")
+  createdAt       DateTime @default(now())
+
+  ticket  SupportTicket?  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  message SupportMessage? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@index([messageId])
+  @@index([userId])
+  @@index([url])
+}
+
+model TrustedDevice {
+  id         String          @id @default(cuid())
+  userId     String
+  deviceId   String
+  method     BiometricMethod @default(unknown)
+  enabled    Boolean         @default(true)
+  lastUsedAt DateTime?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  disabledAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@unique([deviceId])
+  @@index([userId])
+  @@index([enabled])
+}
+
+model Notification {
+  id                   String               @id @default(cuid())
+  title                String
+  message              String
+  notificationCategory String
+  type                 String
+  priority             String               @default("normal")
+  imageUrl             String?
+  color                String?
+  deepLink             String?
+  ctaText              String?
+  ctaUrl               String?
+  audience             NotificationAudience @default(specific_user)
+  targetUserId         String?
+  segment              String?
+  status               NotificationStatus   @default(draft)
+  createdById          String?
+  sentAt               DateTime?
+  disabledAt           DateTime?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  targetUser User? @relation("NotificationTargetUser", fields: [targetUserId], references: [id], onDelete: Cascade)
+  createdBy  User? @relation("NotificationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  receipts   NotificationReceipt[]
+
+  @@index([targetUserId])
+  @@index([notificationCategory])
+  @@index([type])
+  @@index([priority])
+  @@index([status])
+  @@index([audience])
+  @@index([createdAt])
+}
+
+model NotificationReceipt {
+  id             String    @id @default(cuid())
+  notificationId String
+  userId         String
+  isRead         Boolean   @default(false)
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+  @@index([userId])
+  @@index([isRead])
+}
+
+model UserDeviceToken {
+  id         String   @id @default(cuid())
+  userId     String
+  deviceId   String
+  fcmToken   String
+  platform   String
+  isActive   Boolean  @default(true)
+  lastUsedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@index([userId])
+  @@index([deviceId])
+  @@index([fcmToken])
+  @@index([isActive])
+}
+
+model SecurityAudit {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  deviceId  String?
+  ipAddress String?
+  userAgent String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model KycRecord {
+  id              String    @id @default(cuid())
+  userId          String
+  kycReference    String    @unique
+  bvnHash         String?
+  bvnVerified     Boolean   @default(false)
+  selfieVerified  Boolean   @default(false)
+  faceMatch       Boolean   @default(false)
+  confidenceScore Decimal?  @db.Decimal(8, 4)
+  status          KycStatus @default(pending)
+  provider        String    @default("mock")
+  metadata        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+}
+
+model AuthSession {
+  id               String            @id @default(cuid())
+  userId           String
+  refreshTokenHash String
+  status           AuthSessionStatus @default(active)
+  userAgent        String?
+  ipAddress        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actorType  String
+  action     String
+  entityType String?
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model WebhookLog {
+  id                String    @id @default(cuid())
+  provider          String
+  eventType         String
+  providerReference String?
+  internalReference String?
+  status            String    @default("received")
+  rawPayload        Json
+  normalizedPayload Json?
+  signatureValid    Boolean   @default(false)
+  errorMessage      String?
+  receivedAt        DateTime  @default(now())
+  processedAt       DateTime?
+
+  events WebhookEvent[]
+
+  @@index([provider])
+  @@index([eventType])
+  @@index([providerReference])
+  @@index([status])
+  @@index([receivedAt])
+}
+
+model WebhookEvent {
+  id                 String    @id @default(cuid())
+  webhookLogId       String
+  provider           String
+  eventType          String
+  providerReference  String?
+  internalEntityType String
+  internalEntityId   String?
+  processingStatus   String
+  createdAt          DateTime  @default(now())
+  processedAt        DateTime?
+
+  webhookLog WebhookLog @relation(fields: [webhookLogId], references: [id], onDelete: Cascade)
+
+  @@index([webhookLogId])
+  @@index([provider])
+  @@index([eventType])
+  @@index([providerReference])
+  @@index([processingStatus])
+}
+
+model IdempotencyKey {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  provider    String
+  eventType   String
+  processedAt DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([provider])
+  @@index([eventType])
+  @@index([createdAt])
+}
