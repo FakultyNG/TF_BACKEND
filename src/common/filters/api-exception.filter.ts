@@ -31,7 +31,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
     if (typeof exceptionResponse === "string") {
       message = exceptionResponse;
-      code = status === 401 ? "UNAUTHORIZED" : "REQUEST_FAILED";
+      code = this.codeForStatus(status);
     } else if (exceptionResponse && typeof exceptionResponse === "object") {
       const body = exceptionResponse as Record<string, unknown>;
       message =
@@ -40,7 +40,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
           : Array.isArray(body.message)
             ? "Validation failed"
             : message;
-      code = typeof body.code === "string" ? body.code : status === 400 ? "VALIDATION_ERROR" : code;
+      code = typeof body.code === "string" ? body.code : this.codeForStatus(status);
       details = body.details ?? (Array.isArray(body.message) ? body.message : undefined);
     }
 
@@ -59,5 +59,22 @@ export class ApiExceptionFilter implements ExceptionFilter {
       error: details ? { code, details } : { code }
     };
     response.status(status).json(payload);
+  }
+
+  private codeForStatus(status: number) {
+    switch (status) {
+      case HttpStatus.BAD_REQUEST:
+        return "VALIDATION_ERROR";
+      case HttpStatus.UNAUTHORIZED:
+        return "UNAUTHORIZED";
+      case HttpStatus.FORBIDDEN:
+        return "FORBIDDEN";
+      case HttpStatus.NOT_FOUND:
+        return "NOT_FOUND";
+      case HttpStatus.PAYLOAD_TOO_LARGE:
+        return "REQUEST_BODY_TOO_LARGE";
+      default:
+        return status >= 500 ? "INTERNAL_SERVER_ERROR" : "REQUEST_FAILED";
+    }
   }
 }

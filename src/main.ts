@@ -7,7 +7,7 @@ import helmet from "helmet";
 import * as cookieParser from "cookie-parser";
 import { NextFunction, Request, Response, json, urlencoded } from "express";
 import { AppModule } from "./app.module";
-import { ApiErrorBody } from "./common/api-response";
+import { ApiErrorBody, success } from "./common/api-response";
 import { ApiExceptionFilter } from "./common/filters/api-exception.filter";
 
 async function bootstrap() {
@@ -46,6 +46,16 @@ async function bootstrap() {
     })
   );
   app.useGlobalFilters(new ApiExceptionFilter());
+
+  app.getHttpAdapter().getInstance().get("/", (_request: Request, response: Response) => {
+    response.json(
+      success("TF Backend API is running", {
+        service: "tf-backend",
+        docs: `/${apiPrefix}/docs`,
+        health: `/${apiPrefix}/health`
+      })
+    );
+  });
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle("TF Backend API")
