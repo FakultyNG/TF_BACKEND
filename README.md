@@ -135,34 +135,6 @@ Swagger docs:
 http://localhost:4000/api/v1/docs
 ```
 
-## Render Development Deployment
-
-This repo includes a `render.yaml` Blueprint for a development Render service. It keeps the current mock provider setup and provisions a Render PostgreSQL database plus Redis-compatible Key Value store.
-
-Render settings provided by the Blueprint:
-
-- Build command: `npm ci && npx prisma generate && npm run build`
-- Pre-deploy command: `npx prisma migrate deploy`
-- Start command: `npm run start:prod`
-- Health check path: `/api/v1/health`
-- API docs path after deploy: `/api/v1/docs`
-- `NODE_ENV=development`
-- `FCM_ENABLED=false`
-
-Before applying the Blueprint, commit and push `render.yaml` to `main`, then open:
-
-```text
-https://dashboard.render.com/blueprint/new?repo=https://github.com/transfaintel/TF_BACKEND
-```
-
-The Blueprint generates JWT secrets automatically. Cloudinary and Firebase credentials are intentionally not required for this development deployment: uploads will keep returning mock Cloudinary-style URLs when Cloudinary credentials are missing, and FCM push sending stays disabled while `FCM_ENABLED=false`.
-
-Migrations run during deploy. If you need the seeded development admin and fee configs on the Render database, run this one time from the Render service shell after the first deploy:
-
-```bash
-npm run prisma:seed
-```
-
 ## Development Notes
 
 - `MOCK_OTP_CODE` defaults to `123456` for local development.
