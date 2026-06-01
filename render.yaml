@@ -18,22 +18,96 @@ services:
         value: "*"
       - key: JSON_BODY_LIMIT
         value: 10mb
+      - key: LYNC_API_KEY
+        value: ""
+      - key: LYNC_BASE_URL
+        value: ""
+      - key: LYNC_WEBHOOK_SECRET
+        value: ""
+      - key: DOJAH_WEBHOOK_SECRET
+        value: ""
+      - key: PAYOUT_PROVIDER_WEBHOOK_SECRET
+        value: ""
+      - key: REEPLAY_PROVIDER_WEBHOOK_SECRET
+        value: ""
+      - key: WEBHOOK_SIGNATURE_TOLERANCE_SECONDS
+        value: "300"
+      - key: WEBHOOK_IP_ALLOWLIST_ENABLED
+        value: "false"
+      - key: CLOUDINARY_CLOUD_NAME
+        value: ""
+      - key: CLOUDINARY_API_KEY
+        value: ""
+      - key: CLOUDINARY_API_SECRET
+        value: ""
+      - key: FIREBASE_PROJECT_ID
+        value: ""
+      - key: FIREBASE_CLIENT_EMAIL
+        value: ""
+      - key: FIREBASE_PRIVATE_KEY
+        value: ""
       - key: FCM_ENABLED
         value: "false"
+      - key: GIFT_CARD_PROVIDER_API_KEY
+        value: ""
+      - key: FX_PROVIDER_API_KEY
+        value: ""
+      - key: JWT_ACCESS_TTL
+        value: 15m
+      - key: JWT_REFRESH_TTL_DAYS
+        value: "30"
+      - key: OTP_TTL_SECONDS
+        value: "300"
+      - key: OTP_MAX_ATTEMPTS
+        value: "5"
+      - key: REGISTRATION_TTL_SECONDS
+        value: "900"
+      - key: PASSCODE_RESET_TTL_SECONDS
+        value: "600"
+      - key: LOGIN_MAX_ATTEMPTS
+        value: "5"
+      - key: LOGIN_ATTEMPT_TTL_SECONDS
+        value: "900"
       - key: MOCK_OTP_CODE
         value: "123456"
+      - key: MOCK_KYC_FACE_SCORE
+        value: "99.9962"
       - key: ADMIN_PHONE_NUMBER
         value: "2348000000000"
       - key: ADMIN_PASSCODE
         value: "12345"
-      - key: MOCK_NGN_FIXED_FEE
+      - key: NGN_TRANSFER_FIXED_FEE
         value: "100"
-      - key: MOCK_USD_RATE_NGN
+      - key: USD_MOCK_FX_RATE
         value: "1650"
-      - key: MOCK_CNY_RATE_NGN
+      - key: USD_PROVIDER_FEE_NGN
+        value: "2500"
+      - key: USD_TF_FEE_NGN
+        value: "1500"
+      - key: USD_SETTLEMENT_TIME
+        value: "1-3 business days"
+      - key: CNY_MOCK_FX_RATE
         value: "230"
-      - key: MOCK_GIFT_CARD_USD_RATE_NGN
+      - key: CNY_PROVIDER_FEE_NGN
+        value: "3000"
+      - key: CNY_TF_FEE_NGN
+        value: "2500"
+      - key: CNY_SETTLEMENT_TIME
+        value: "1-3 business days"
+      - key: GIFT_CARD_USD_FX_RATE
         value: "1680"
+      - key: GIFT_CARD_CNY_FX_RATE
+        value: "230"
+      - key: GIFT_CARD_FEE_NGN
+        value: "1000"
+      - key: CASH_DROP_MATCH_THRESHOLD
+        value: "92"
+      - key: CASH_DROP_AMBIGUITY_MARGIN
+        value: "1"
+      - key: CASH_DROP_RESOLVE_MAX_ATTEMPTS
+        value: "10"
+      - key: CASH_DROP_RESOLVE_TTL_SECONDS
+        value: "60"
       - key: DATABASE_URL
         fromDatabase:
           name: tf-backend-postgres-dev
