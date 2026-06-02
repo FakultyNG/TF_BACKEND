@@ -10,6 +10,7 @@ export interface FxQuoteResult {
 
 export interface FxPayoutResult {
   status: "processing" | "successful" | "failed";
+  provider: string;
   providerReference: string;
   raw?: unknown;
 }

@@ -1,19 +1,24 @@
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
-import { AuthSessionStatus, Prisma, UserRole } from "@prisma/client";
+import { AuthSessionStatus, KycStatus, Prisma, UserRole } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { v4 as uuid } from "uuid";
+import { CashDropService } from "../cash-drop/cash-drop.service";
 import { ApiException } from "../common/errors/api.exception";
 import { sha256 } from "../common/utils/hash.util";
 import { normalizePhoneNumber } from "../common/utils/phone.util";
 import { PrismaService } from "../prisma/prisma.service";
+import { KycProvider } from "../providers/interfaces/kyc-provider.interface";
+import { KYC_PROVIDER } from "../providers/provider.tokens";
 import { RedisService } from "../redis/redis.service";
+import { CloudinaryService } from "../uploads/cloudinary.service";
 import { UsersRepository } from "../users/users.repository";
 import { UsersService } from "../users/users.service";
+import { WalletService } from "../wallet/wallet.service";
 import { CompleteRegistrationDto } from "./dto/complete-registration.dto";
 import { LoginDto } from "./dto/login.dto";
-import { RegistrationSession } from "./types/registration-session";
+import { RegistrationKycState, RegistrationSession } from "./types/registration-session";
 
 @Injectable()
 export class AuthService {
@@ -23,7 +28,11 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly redis: RedisService,
     private readonly jwt: JwtService,
-    private readonly config: ConfigService
+    private readonly config: ConfigService,
+    @Inject(KYC_PROVIDER) private readonly kycProvider: KycProvider,
+    private readonly cloudinaryService: CloudinaryService,
+    private readonly walletService: WalletService,
+    private readonly cashDropService: CashDropService
   ) {}
 
   async startRegistration(phoneNumber: string) {
@@ -50,15 +59,66 @@ export class AuthService {
     return { registrationToken, phoneNumber: normalized, requiresOtp: true };
   }
 
+  async verifyRegistrationBvn(registrationToken: string, bvn: string) {
+    const { session, ttl } = await this.getRegistrationSession(registrationToken);
+    const result = await this.kycProvider.verifyBvn(bvn);
+    const kycReference = `kyc_ref_${uuid().replace(/-/g, "").slice(0, 12)}`;
+    const kyc: RegistrationKycState = {
+      kycReference,
+      bvnHash: sha256(bvn),
+      bvnVerified: result.bvnVerified,
+      status: KycStatus.bvn_verified,
+      providerResult: result
+    };
+    await this.redis.setJson(`registration:${registrationToken}`, { ...session, kyc }, ttl);
+    return { kycReference, ...result };
+  }
+
+  async validateRegistrationSelfie(registrationToken: string, kycReference: string, selfieImageBase64: string) {
+    const { session, ttl } = await this.getRegistrationSession(registrationToken);
+    if (!session.kyc || session.kyc.kycReference !== kycReference || !session.kyc.bvnVerified) {
+      throw new ApiException("Registration KYC BVN verification required", "REGISTRATION_KYC_BVN_REQUIRED", HttpStatus.BAD_REQUEST);
+    }
+    const cleaned = selfieImageBase64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
+    const uploadedSelfie = await this.cloudinaryService.uploadBase64Image(
+      selfieImageBase64,
+      "tf/users/kyc-selfies",
+      `${kycReference}.jpg`
+    );
+    const result = await this.kycProvider.validateSelfie(kycReference, cleaned);
+    const kyc: RegistrationKycState = {
+      ...session.kyc,
+      selfieVerified: result.faceMatch,
+      faceMatch: result.faceMatch,
+      confidenceScore: result.confidenceScore,
+      status: result.faceMatch ? KycStatus.verified : KycStatus.rejected,
+      selfieImageUrl: uploadedSelfie.secureUrl,
+      selfieUploadId: uploadedSelfie.uploadId,
+      selfieResult: result
+    };
+    await this.redis.setJson(`registration:${registrationToken}`, { ...session, kyc }, ttl);
+    return {
+      kycStatus: result.faceMatch ? "verified" : "rejected",
+      faceMatch: result.faceMatch,
+      confidenceScore: result.confidenceScore,
+      profileImageUrl: result.faceMatch ? uploadedSelfie.secureUrl : result.profileImageUrl
+    };
+  }
+
   async completeRegistration(dto: CompleteRegistrationDto, meta: { ipAddress?: string; userAgent?: string }) {
     const session = await this.redis.getJson<RegistrationSession>(`registration:${dto.registrationToken}`);
     if (!session) {
       throw new ApiException("Registration session expired", "REGISTRATION_SESSION_EXPIRED", HttpStatus.BAD_REQUEST);
     }
+    if (!session.kyc || session.kyc.status !== KycStatus.verified) {
+      throw new ApiException("KYC verification is required to complete registration", "REGISTRATION_KYC_REQUIRED", HttpStatus.BAD_REQUEST);
+    }
     const existing = await this.usersRepository.findByPhoneNumber(session.phoneNumber);
     if (existing) throw new ApiException("User already exists", "USER_ALREADY_EXISTS", HttpStatus.CONFLICT);
     const passcodeHash = await bcrypt.hash(dto.passcode, 12);
     const user = await this.usersRepository.createUser(session.phoneNumber, passcodeHash);
+    await this.attachRegistrationKyc(user.id, session.kyc);
+    await this.autoProvisionAfterRegistrationKyc(user.id);
     await this.redis.del(`registration:${dto.registrationToken}`);
     await this.redis.del(`registration-phone:${session.phoneNumber}`);
     await this.audit(user.id, "USER_REGISTERED", "User", user.id, meta);
@@ -214,6 +274,102 @@ export class AuthService {
       { sub: userId, sid: sessionId, typ: "access" },
       { secret: this.config.get<string>("JWT_ACCESS_SECRET"), expiresIn: this.config.get<string>("JWT_ACCESS_TTL", "15m") }
     );
+  }
+
+  private async getRegistrationSession(registrationToken: string) {
+    const session = await this.redis.getJson<RegistrationSession>(`registration:${registrationToken}`);
+    if (!session) {
+      throw new ApiException("Registration session expired", "REGISTRATION_SESSION_EXPIRED", HttpStatus.BAD_REQUEST);
+    }
+    const ttl = Number(this.config.get<string>("REGISTRATION_TTL_SECONDS", "900"));
+    return { session, ttl };
+  }
+
+  private async attachRegistrationKyc(userId: string, kyc: RegistrationKycState) {
+    const profile = kyc.providerResult;
+    await this.prisma.$transaction([
+      this.prisma.kycRecord.create({
+        data: {
+          userId,
+          kycReference: kyc.kycReference,
+          bvnHash: kyc.bvnHash,
+          bvnVerified: kyc.bvnVerified,
+          selfieVerified: kyc.selfieVerified ?? false,
+          faceMatch: kyc.faceMatch ?? false,
+          confidenceScore: kyc.confidenceScore,
+          status: kyc.status,
+          metadata: {
+            ...profile,
+            selfie: kyc.selfieResult,
+            selfieImageUrl: kyc.selfieImageUrl,
+            selfieUploadId: kyc.selfieUploadId
+          } as unknown as Prisma.InputJsonObject
+        }
+      }),
+      this.prisma.profile.upsert({
+        where: { userId },
+        create: {
+          userId,
+          firstName: profile.firstName,
+          lastName: profile.lastName,
+          email: profile.email,
+          dateOfBirth: new Date(profile.dateOfBirth),
+          country: profile.country,
+          profileImageUrl: kyc.selfieImageUrl ?? kyc.selfieResult?.profileImageUrl
+        },
+        update: {
+          firstName: profile.firstName,
+          lastName: profile.lastName,
+          email: profile.email,
+          dateOfBirth: new Date(profile.dateOfBirth),
+          country: profile.country,
+          profileImageUrl: kyc.selfieImageUrl ?? kyc.selfieResult?.profileImageUrl
+        }
+      }),
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { walletStatus: "active" }
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          actorId: userId,
+          actorType: "user",
+          action: "REGISTRATION_KYC_ATTACHED",
+          entityType: "KycRecord",
+          entityId: kyc.kycReference
+        }
+      })
+    ]);
+  }
+
+  private async autoProvisionAfterRegistrationKyc(userId: string) {
+    try {
+      await this.walletService.activateWallet(userId);
+      const dva = await this.walletService.createDva(userId, "auto");
+      const cashDrop = await this.cashDropService.register(userId);
+      await this.prisma.auditLog.create({
+        data: {
+          actorId: userId,
+          actorType: "system",
+          action: "REGISTRATION_KYC_AUTO_PROVISION_COMPLETED",
+          entityType: "User",
+          entityId: userId,
+          metadata: { dvaReady: true, cashDropId: cashDrop.CashDropId, dva }
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Registration KYC auto provisioning failed";
+      await this.prisma.auditLog.create({
+        data: {
+          actorId: userId,
+          actorType: "system",
+          action: "REGISTRATION_KYC_AUTO_PROVISION_FAILED",
+          entityType: "User",
+          entityId: userId,
+          metadata: { message }
+        }
+      });
+    }
   }
 
   async audit(actorId: string | undefined, action: string, entityType?: string, entityId?: string, meta?: Record<string, unknown>) {

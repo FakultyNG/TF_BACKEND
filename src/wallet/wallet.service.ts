@@ -58,6 +58,8 @@ export class WalletService {
       phoneNumber: user.phoneNumber,
       firstName: user.profile?.firstName,
       lastName: user.profile?.lastName,
+      email: user.profile?.email,
+      dateOfBirth: user.profile?.dateOfBirth,
       preferredBank
     });
     const dva = await this.prisma.dedicatedVirtualAccount.create({
@@ -143,12 +145,12 @@ export class WalletService {
       type: TransactionType.wallet_funding,
       reference,
       description: "Wallet funding",
-      provider: "mock_lync",
+      provider: funding.provider,
       providerReference: funding.providerReference,
       idempotencyKey: `funding:${reference}`,
       metadata: funding.raw as Prisma.InputJsonValue
     });
-    await this.logProvider("mock_lync", "verify_funding", reference, funding.providerReference, funding.status, { reference }, funding.raw);
+    await this.logProvider(funding.provider, "verify_funding", reference, funding.providerReference, funding.status, { reference }, funding.raw);
     return {
       transactionId: result.transaction.id,
       amount: result.transaction.amount,
@@ -365,6 +367,13 @@ export class WalletService {
     return this.prisma.transaction.update({ where: { id }, data: { providerReference, status } });
   }
 
+  updateTransactionProviderMetadata(id: string, provider: string, providerReference: string, status?: TransactionStatus) {
+    return this.prisma.transaction.update({
+      where: { id },
+      data: { provider, providerReference, providerStatus: status, status }
+    });
+  }
+
   private async ensureWalletTx(tx: Prisma.TransactionClient, userId: string, status: WalletStatus) {
     return tx.wallet.upsert({
       where: { userId },
@@ -381,8 +390,8 @@ export class WalletService {
         requestReference,
         providerReference,
         status,
-        requestPayload: requestPayload as Prisma.InputJsonValue,
-        responsePayload: responsePayload as Prisma.InputJsonValue
+        requestPayload: this.toSafeJson(requestPayload),
+        responsePayload: this.toSafeJson(responsePayload)
       }
     });
   }
@@ -395,6 +404,35 @@ export class WalletService {
       provider: dva.provider,
       status: dva.status
     };
+  }
+
+  private toSafeJson(value: unknown): Prisma.InputJsonValue {
+    return this.stripUndefined(this.maskSensitive(value)) as Prisma.InputJsonValue;
+  }
+
+  private maskSensitive(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map((item) => this.maskSensitive(item));
+    if (!value || typeof value !== "object") return value;
+    const output: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value)) {
+      output[key] = this.isSensitiveKey(key) ? "***MASKED***" : this.maskSensitive(child);
+    }
+    return output;
+  }
+
+  private stripUndefined(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map((item) => this.stripUndefined(item));
+    if (!value || typeof value !== "object") return value;
+    const output: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value)) {
+      if (child !== undefined) output[key] = this.stripUndefined(child);
+    }
+    return output;
+  }
+
+  private isSensitiveKey(key: string) {
+    const lower = key.toLowerCase();
+    return ["bvn", "nin", "token", "secret", "authorization", "password", "passcode"].some((part) => lower.includes(part));
   }
 }
 

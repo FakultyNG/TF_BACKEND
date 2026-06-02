@@ -99,6 +99,7 @@ export class TransfersService {
       type: TransactionType.ngn_transfer,
       status: TransactionStatus.processing,
       reference,
+      provider: "pending",
       description: "NGN transfer",
       narration: narration || quote.narration,
       idempotencyKey: `confirm:${quoteId}`,
@@ -112,8 +113,14 @@ export class TransfersService {
         narration: narration || quote.narration,
         reference
       });
-      await this.walletService.updateTransactionProvider(debit.transaction.id, providerResult.providerReference, providerResult.status as TransactionStatus);
-      await this.walletService.logProvider("mock_lync", "ngn_transfer", reference, providerResult.providerReference, providerResult.status, quote, providerResult.raw);
+      const provider = providerResult.provider ?? "mock_lync";
+      await this.updateTransactionProvider(
+        debit.transaction.id,
+        provider,
+        providerResult.providerReference,
+        providerResult.status as TransactionStatus
+      );
+      await this.walletService.logProvider(provider, "ngn_transfer", reference, providerResult.providerReference, providerResult.status, quote, providerResult.raw);
       await this.recentBeneficiaries.saveOrUpdateNgnBeneficiary(userId, quote, debit.transaction.id);
       await this.redis.del(`quote:${quoteId}`);
       return {
@@ -124,13 +131,13 @@ export class TransfersService {
         narration: narration || quote.narration
       };
     } catch (error) {
-      await this.walletService.reverseTransaction(undefined, debit.transaction.id, "Provider failed before NGN transfer submission");
+      await this.reverseProviderFailure(debit.transaction.id, "Provider failed before NGN transfer submission");
       throw error;
     }
   }
 
   async quoteFx(userId: string, payoutCurrency: "USD" | "CNY", dto: FxTransferQuoteDto) {
-    const providerQuote = await this.pricingService.getFxPricing(payoutCurrency, dto.amount);
+    const providerQuote = await this.fxProvider.quote({ payoutCurrency, amount: dto.amount });
     const balance = await this.walletService.getBalance(userId);
     if (balance.balance < providerQuote.totalNgnDebit) {
       throw new ApiException("Insufficient wallet balance", "INSUFFICIENT_BALANCE", HttpStatus.BAD_REQUEST);
@@ -177,7 +184,7 @@ export class TransfersService {
       type: payoutCurrency === "USD" ? TransactionType.usd_transfer : TransactionType.cny_transfer,
       status: TransactionStatus.processing,
       reference,
-      provider: "mock_lync",
+      provider: "pending",
       description: `${payoutCurrency} transfer`,
       narration: quote.paymentReference,
       idempotencyKey: `confirm:${quoteId}`,
@@ -192,8 +199,14 @@ export class TransfersService {
         payoutAmount: quote.payoutAmount,
         beneficiary: quote.beneficiary
       });
-      await this.walletService.updateTransactionProvider(debit.transaction.id, providerResult.providerReference, providerResult.status as TransactionStatus);
-      await this.walletService.logProvider("mock_lync", `${payoutCurrency.toLowerCase()}_payout`, reference, providerResult.providerReference, providerResult.status, quote, providerResult.raw);
+      const provider = providerResult.provider ?? "mock_lync";
+      await this.updateTransactionProvider(
+        debit.transaction.id,
+        provider,
+        providerResult.providerReference,
+        providerResult.status as TransactionStatus
+      );
+      await this.walletService.logProvider(provider, `${payoutCurrency.toLowerCase()}_payout`, reference, providerResult.providerReference, providerResult.status, quote, providerResult.raw);
       await this.recentBeneficiaries.saveOrUpdateSupplierBeneficiary(
         userId,
         payoutCurrency === "USD" ? TransactionType.usd_transfer : TransactionType.cny_transfer,
@@ -210,7 +223,7 @@ export class TransfersService {
         totalNgnDebit: quote.totalNgnDebit
       };
     } catch (error) {
-      await this.walletService.reverseTransaction(undefined, debit.transaction.id, `Provider failed before ${payoutCurrency} payout submission`);
+      await this.reverseProviderFailure(debit.transaction.id, `Provider failed before ${payoutCurrency} payout submission`);
       throw error;
     }
   }
@@ -245,5 +258,23 @@ export class TransfersService {
       estimatedSettlementTime: quote.estimatedSettlementTime,
       expiresAt: quote.expiresAt
     };
+  }
+
+  private updateTransactionProvider(id: string, provider: string, providerReference: string, status?: TransactionStatus) {
+    const wallet = this.walletService as WalletService & {
+      updateTransactionProviderMetadata?: (id: string, provider: string, providerReference: string, status?: TransactionStatus) => Promise<unknown>;
+      updateTransactionProvider?: (id: string, providerReference: string, status?: TransactionStatus) => Promise<unknown>;
+    };
+    if (typeof wallet.updateTransactionProviderMetadata === "function") {
+      return wallet.updateTransactionProviderMetadata(id, provider, providerReference, status);
+    }
+    return wallet.updateTransactionProvider?.(id, providerReference, status);
+  }
+
+  private reverseProviderFailure(transactionId: string, reason: string) {
+    const wallet = this.walletService as WalletService & {
+      reverseTransaction?: (adminId: string | undefined, transactionId: string, reason: string) => Promise<unknown>;
+    };
+    return wallet.reverseTransaction?.(undefined, transactionId, reason);
   }
 }

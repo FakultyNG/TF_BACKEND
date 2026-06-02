@@ -1,11 +1,10 @@
 import { HttpStatus, Injectable } from "@nestjs/common";
-import { DvaStatus, LedgerEntryType, Prisma, TransactionStatus, TransactionType } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { IncomingHttpHeaders } from "http";
 import { ApiException } from "../../common/errors/api.exception";
 import { PrismaService } from "../../prisma/prisma.service";
 import { WalletService } from "../../wallet/wallet.service";
 import {
-  asRecord,
   eventKey,
   normalizeWebhookEvent,
   payloadHasAnyEvent,
@@ -13,6 +12,10 @@ import {
 } from "../common/webhook-event-normalizer";
 import { WebhookLogService } from "../common/webhook-log.service";
 import { WebhookSignatureService } from "../common/webhook-signature.service";
+import { LyncDvaHandler } from "./handlers/lync-dva.handler";
+import { LyncFundingHandler } from "./handlers/lync-funding.handler";
+import { LyncNgnTransferHandler } from "./handlers/lync-ngn-transfer.handler";
+import { LyncPayoutHandler } from "./handlers/lync-payout.handler";
 
 @Injectable()
 export class LyncWebhookService {
@@ -20,9 +23,13 @@ export class LyncWebhookService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly walletService: WalletService,
+    _walletService: WalletService,
     private readonly logs: WebhookLogService,
-    private readonly signatures: WebhookSignatureService
+    private readonly signatures: WebhookSignatureService,
+    private readonly dvaHandler?: LyncDvaHandler,
+    private readonly fundingHandler?: LyncFundingHandler,
+    private readonly ngnTransferHandler?: LyncNgnTransferHandler,
+    private readonly payoutHandler?: LyncPayoutHandler
   ) {}
 
   async receive(payload: unknown, headers: IncomingHttpHeaders) {
@@ -75,123 +82,19 @@ export class LyncWebhookService {
   }
 
   private async dispatch(event: NormalizedWebhookEvent, payload: unknown) {
-    if (payloadHasAnyEvent(event.eventType, ["funding", "deposit", "collection"])) return this.handleFunding(event, payload);
-    if (payloadHasAnyEvent(event.eventType, ["transfer", "ngn"])) return this.handleNgnTransfer(event);
-    if (payloadHasAnyEvent(event.eventType, ["dva", "virtual_account", "virtual-account"])) return this.handleDva(event, payload);
+    if (payloadHasAnyEvent(event.eventType, ["funding", "deposit", "collection"])) {
+      return this.fundingHandler ? this.fundingHandler.handle(event, payload) : { ignored: true, message: "Lync funding handler unavailable" };
+    }
+    if (payloadHasAnyEvent(event.eventType, ["payout", "payment", "usd", "cny"])) {
+      return this.payoutHandler ? this.payoutHandler.handle(event) : { ignored: true, message: "Lync payout handler unavailable" };
+    }
+    if (payloadHasAnyEvent(event.eventType, ["transfer", "ngn"])) {
+      return this.ngnTransferHandler ? this.ngnTransferHandler.handle(event) : { ignored: true, message: "Lync NGN transfer handler unavailable" };
+    }
+    if (payloadHasAnyEvent(event.eventType, ["dva", "virtual_account", "virtual-account"])) {
+      return this.dvaHandler ? this.dvaHandler.handle(event, payload) : { ignored: true, message: "Lync DVA handler unavailable" };
+    }
     return { ignored: true, message: "Unsupported Lync webhook event" };
-  }
-
-  private async handleFunding(event: NormalizedWebhookEvent, payload: unknown) {
-    if (event.status && event.status !== TransactionStatus.successful) {
-      return { ignored: true, message: "Funding event is not successful" };
-    }
-    const amount = event.amount;
-    if (!amount || amount <= 0) return { ignored: true, message: "Funding amount missing" };
-
-    const existing = await this.findTransaction(event);
-    if (existing) {
-      await this.prisma.transaction.update({ where: { id: existing.id }, data: { status: TransactionStatus.successful, completedAt: new Date() } });
-      return { entityType: "Transaction", entityId: existing.id };
-    }
-
-    const dva = await this.findDva(event);
-    const userId = event.userId ?? dva?.userId;
-    if (!userId) return { ignored: true, message: "Funding user could not be matched" };
-
-    const reference = event.internalReference ?? event.providerReference ?? `lync_funding_${Date.now()}`;
-    const result = await this.walletService.creditWallet({
-      userId,
-      amount,
-      type: TransactionType.wallet_funding,
-      status: TransactionStatus.successful,
-      reference,
-      provider: this.provider,
-      providerReference: event.providerReference,
-      description: "Wallet funding confirmed by webhook",
-      idempotencyKey: `webhook:${this.provider}:funding:${event.providerReference ?? reference}`,
-      entryType: LedgerEntryType.credit,
-      metadata: this.logs.toJson(this.logs.sanitize(payload))
-    });
-    await this.logs.notifyUser({
-      userId,
-      title: "Wallet funded",
-      message: "Your wallet funding was successful.",
-      category: "transaction",
-      type: "wallet_funding"
-    });
-    await this.auditMoneyEvent(userId, result.transaction.id, "WEBHOOK_WALLET_CREDITED", { amount, providerReference: event.providerReference ?? null });
-    return { entityType: "Transaction", entityId: result.transaction.id };
-  }
-
-  private async handleNgnTransfer(event: NormalizedWebhookEvent) {
-    const transaction = await this.findTransaction(event);
-    if (!transaction) return { ignored: true, message: "NGN transfer transaction could not be matched" };
-    if (event.status === TransactionStatus.successful) {
-      await this.prisma.transaction.update({ where: { id: transaction.id }, data: { status: TransactionStatus.successful, completedAt: new Date() } });
-      await this.logs.notifyUser({ userId: transaction.userId, title: "Transfer successful", message: "Your NGN transfer was successful.", category: "transaction", type: "transfer_success" });
-    } else if (event.status === TransactionStatus.failed || event.status === TransactionStatus.reversed || event.status === "cancelled") {
-      if (transaction.status !== TransactionStatus.reversed) {
-        await this.walletService.reverseTransaction(undefined, transaction.id, "NGN transfer reversed by Lync webhook");
-      }
-      await this.logs.notifyUser({ userId: transaction.userId, title: "Transfer reversed", message: "Your NGN transfer was reversed.", category: "transaction", type: "transfer_failed", priority: "high" });
-    } else if (event.status) {
-      await this.prisma.transaction.update({ where: { id: transaction.id }, data: { status: event.status as TransactionStatus } });
-    }
-    return { entityType: "Transaction", entityId: transaction.id };
-  }
-
-  private async handleDva(event: NormalizedWebhookEvent, payload: unknown) {
-    const body = asRecord(payload);
-    const data = asRecord(body.data);
-    const status = this.toDvaStatus(event.status);
-    const accountNumber = event.accountNumber;
-    const providerReference = event.providerReference;
-    if (!providerReference && !accountNumber) return { ignored: true, message: "DVA reference missing" };
-    const updated = await this.prisma.dedicatedVirtualAccount.updateMany({
-      where: {
-        OR: [
-          providerReference ? { providerReference } : undefined,
-          accountNumber ? { accountNumber } : undefined
-        ].filter(Boolean) as Prisma.DedicatedVirtualAccountWhereInput[]
-      },
-      data: {
-        status,
-        providerReference,
-        bankName: typeof data.bankName === "string" ? data.bankName : undefined,
-        accountName: typeof data.accountName === "string" ? data.accountName : undefined
-      }
-    });
-    if (!updated.count) return { ignored: true, message: "DVA could not be matched" };
-    return { entityType: "DedicatedVirtualAccount", entityId: providerReference ?? accountNumber };
-  }
-
-  private findTransaction(event: NormalizedWebhookEvent) {
-    return this.prisma.transaction.findFirst({
-      where: {
-        OR: [
-          event.providerReference ? { providerReference: event.providerReference } : undefined,
-          event.internalReference ? { reference: event.internalReference } : undefined,
-          event.providerReference ? { reference: event.providerReference } : undefined
-        ].filter(Boolean) as Prisma.TransactionWhereInput[]
-      }
-    });
-  }
-
-  private findDva(event: NormalizedWebhookEvent) {
-    return this.prisma.dedicatedVirtualAccount.findFirst({
-      where: {
-        OR: [
-          event.providerReference ? { providerReference: event.providerReference } : undefined,
-          event.accountNumber ? { accountNumber: event.accountNumber } : undefined
-        ].filter(Boolean) as Prisma.DedicatedVirtualAccountWhereInput[]
-      }
-    });
-  }
-
-  private toDvaStatus(status?: NormalizedWebhookEvent["status"]) {
-    if (status === TransactionStatus.failed || status === "cancelled") return DvaStatus.failed;
-    if (status === TransactionStatus.reversed) return DvaStatus.inactive;
-    return DvaStatus.active;
   }
 
   private isUniqueError(error: unknown) {
@@ -204,9 +107,4 @@ export class LyncWebhookService {
     });
   }
 
-  private auditMoneyEvent(userId: string, transactionId: string, action: string, metadata: Prisma.InputJsonObject) {
-    return this.prisma.auditLog.create({
-      data: { actorId: userId, actorType: "system", action, entityType: "Transaction", entityId: transactionId, metadata }
-    });
-  }
 }

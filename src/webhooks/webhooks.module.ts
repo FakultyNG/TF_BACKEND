@@ -11,6 +11,10 @@ import { DojahWebhookController } from "./dojah/dojah-webhook.controller";
 import { DojahWebhookService } from "./dojah/dojah-webhook.service";
 import { GiftCardProviderWebhookController } from "./gift-card-provider/gift-card-provider-webhook.controller";
 import { GiftCardProviderWebhookService } from "./gift-card-provider/gift-card-provider-webhook.service";
+import { LyncDvaHandler } from "./lync/handlers/lync-dva.handler";
+import { LyncFundingHandler } from "./lync/handlers/lync-funding.handler";
+import { LyncNgnTransferHandler } from "./lync/handlers/lync-ngn-transfer.handler";
+import { LyncPayoutHandler } from "./lync/handlers/lync-payout.handler";
 import { LyncWebhookController } from "./lync/lync-webhook.controller";
 import { LyncWebhookService } from "./lync/lync-webhook.service";
 import { PayoutProviderWebhookController } from "./payout-provider/payout-provider-webhook.controller";
@@ -28,6 +32,10 @@ import { PayoutProviderWebhookService } from "./payout-provider/payout-provider-
   providers: [
     WebhookSignatureService,
     WebhookLogService,
+    LyncDvaHandler,
+    LyncFundingHandler,
+    LyncNgnTransferHandler,
+    LyncPayoutHandler,
     LyncWebhookService,
     DojahWebhookService,
     PayoutProviderWebhookService,

@@ -7,6 +7,8 @@ import { AuthService } from "./auth.service";
 import { CompleteRegistrationDto } from "./dto/complete-registration.dto";
 import { LoginDto } from "./dto/login.dto";
 import { RefreshTokenDto } from "./dto/refresh-token.dto";
+import { RegisterKycBvnDto } from "./dto/register-kyc-bvn.dto";
+import { RegisterKycSelfieDto } from "./dto/register-kyc-selfie.dto";
 import { StartRegistrationDto } from "./dto/start-registration.dto";
 import { JwtAuthGuard } from "./guards/jwt-auth.guard";
 
@@ -28,6 +30,18 @@ export class AuthController {
       userAgent: req.headers["user-agent"]
     });
     return success("Registration completed successfully", data);
+  }
+
+  @Post("register/kyc/bvn/verify")
+  async verifyRegistrationBvn(@Body() dto: RegisterKycBvnDto) {
+    const data = await this.authService.verifyRegistrationBvn(dto.registrationToken, dto.bvn);
+    return success("BVN verified successfully", data);
+  }
+
+  @Post("register/kyc/selfie-validate")
+  async validateRegistrationSelfie(@Body() dto: RegisterKycSelfieDto) {
+    const data = await this.authService.validateRegistrationSelfie(dto.registrationToken, dto.kycReference, dto.selfieImageBase64);
+    return success("Selfie validation successful", data);
   }
 
   @Post("login")

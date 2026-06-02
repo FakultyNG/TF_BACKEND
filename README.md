@@ -184,12 +184,12 @@ npm run start:dev
 POST /api/v1/otp/send
 POST /api/v1/otp/validate
 POST /api/v1/auth/register/start
+POST /api/v1/auth/register/kyc/bvn/verify
+POST /api/v1/auth/register/kyc/selfie-validate
 POST /api/v1/auth/register/complete
-POST /api/v1/kyc/bvn/verify
-POST /api/v1/kyc/bvn/selfie-validate
 ```
 
-Use `MOCK_OTP_CODE=123456`. The mock KYC provider accepts any 11-digit BVN.
+Use `MOCK_OTP_CODE=123456`. The mock KYC provider accepts any 11-digit BVN. Registration completion now requires the pre-registration BVN and selfie endpoints to pass for the same `registrationToken`.
 
 3. Click `Authorize` in Swagger and paste only the access token value, without `Bearer`.
 
@@ -348,6 +348,44 @@ curl -X POST http://localhost:4000/api/v1/webhooks/lync \
 Webhook processing stores `WebhookLog` and `WebhookEvent` rows, uses `IdempotencyKey` records to reject duplicates, masks sensitive payload fields, and creates wallet ledger entries/reversal transactions for any wallet-impacting event. Admins can review logs and retry failed processing through `/api/v1/admin/webhooks/*`.
 
 Webhook services create TF notification rows for important status changes and then attempt Firebase push delivery through `NotificationsService`. Provider webhook controllers do not call Firebase directly.
+
+## Lync Provider Setup
+
+Transfa mobile/admin APIs stay unchanged. Lync is used only behind the provider layer for DVA creation, funding verification, NGN account validation/transfers, FX quotes, and USD/CNY payouts.
+
+Development mode should keep:
+
+```env
+LYNC_ENABLED=false
+```
+
+With `LYNC_ENABLED=false`, the backend uses `MockLyncProvider`, returns stable predictable responses, and stores provider metadata as `mock_lync`.
+
+Live/sandbox mode requires Lync dashboard/API credentials and exact endpoint paths:
+
+```env
+LYNC_ENABLED=true
+LYNC_ENV=sandbox
+LYNC_BASE_URL=
+LYNC_API_KEY=
+LYNC_SECRET_KEY=
+LYNC_CLIENT_ID=
+LYNC_CLIENT_SECRET=
+LYNC_WEBHOOK_SECRET=
+LYNC_CREATE_DVA_PATH=
+LYNC_GET_DVA_PATH=
+LYNC_VERIFY_FUNDING_PATH=
+LYNC_BANKS_PATH=
+LYNC_RESOLVE_ACCOUNT_PATH=
+LYNC_NGN_TRANSFER_PATH=
+LYNC_FX_QUOTE_PATH=
+LYNC_FX_PAYOUT_PATH=
+LYNC_RECEIPT_PATH=
+```
+
+Do not guess the `LYNC_*_PATH` values. Copy them from Lync's official dashboard/docs for the banking API environment you are using. If a live endpoint path is missing, the backend fails fast with a Lync configuration error instead of calling an incorrect route.
+
+Provider request/response logs are stored in `ProviderLog` with sensitive fields masked. Raw Lync responses are never returned directly to Flutter.
 
 ## Firebase Cloud Messaging Setup
 

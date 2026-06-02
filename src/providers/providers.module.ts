@@ -1,10 +1,10 @@
 import { Module } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { MockKycProvider } from "./adapters/mock-kyc.provider";
 import { MockOtpProvider } from "./adapters/mock-otp.provider";
-import { MockDvaProvider } from "./dva/mock-dva.provider";
-import { MockFxPayoutProvider } from "./fx-payout/mock-fx-payout.provider";
 import { MockGiftCardProvider } from "./gift-cards/mock-gift-card.provider";
-import { MockNgnTransferProvider } from "./transfers/mock-ngn-transfer.provider";
+import { LyncModule } from "./lync/lync.module";
+import { LyncService, MockLyncProvider } from "./lync/lync.service";
 import {
   DVA_PROVIDER,
   FX_PAYOUT_PROVIDER,
@@ -14,13 +14,29 @@ import {
   OTP_PROVIDER
 } from "./provider.tokens";
 
+const lyncProviderFactory = (config: ConfigService, lync: LyncService, mock: MockLyncProvider) =>
+  ["1", "true", "yes", "on"].includes(config.get<string>("LYNC_ENABLED", "false").toLowerCase()) ? lync : mock;
+
 @Module({
+  imports: [LyncModule],
   providers: [
     { provide: OTP_PROVIDER, useClass: MockOtpProvider },
     { provide: KYC_PROVIDER, useClass: MockKycProvider },
-    { provide: DVA_PROVIDER, useClass: MockDvaProvider },
-    { provide: NGN_TRANSFER_PROVIDER, useClass: MockNgnTransferProvider },
-    { provide: FX_PAYOUT_PROVIDER, useClass: MockFxPayoutProvider },
+    {
+      provide: DVA_PROVIDER,
+      useFactory: lyncProviderFactory,
+      inject: [ConfigService, LyncService, MockLyncProvider]
+    },
+    {
+      provide: NGN_TRANSFER_PROVIDER,
+      useFactory: lyncProviderFactory,
+      inject: [ConfigService, LyncService, MockLyncProvider]
+    },
+    {
+      provide: FX_PAYOUT_PROVIDER,
+      useFactory: lyncProviderFactory,
+      inject: [ConfigService, LyncService, MockLyncProvider]
+    },
     { provide: GIFT_CARD_PROVIDER, useClass: MockGiftCardProvider }
   ],
   exports: [OTP_PROVIDER, KYC_PROVIDER, DVA_PROVIDER, NGN_TRANSFER_PROVIDER, FX_PAYOUT_PROVIDER, GIFT_CARD_PROVIDER]

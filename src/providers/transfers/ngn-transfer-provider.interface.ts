@@ -16,6 +16,7 @@ export interface BankAccountSuggestion extends ResolvedAccount {
 
 export interface NgnTransferResult {
   status: "processing" | "successful" | "failed";
+  provider: string;
   providerReference: string;
   raw?: unknown;
 }

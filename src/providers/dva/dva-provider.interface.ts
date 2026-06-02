@@ -3,6 +3,9 @@ export interface CreateDvaInput {
   phoneNumber: string;
   firstName?: string | null;
   lastName?: string | null;
+  email?: string | null;
+  bvn?: string | null;
+  dateOfBirth?: Date | string | null;
   preferredBank?: string;
 }
 
@@ -21,6 +24,7 @@ export interface VerifyFundingResult {
   amount: number;
   currency: "NGN";
   status: "successful" | "failed" | "pending";
+  provider: string;
   providerReference: string;
   raw?: unknown;
 }

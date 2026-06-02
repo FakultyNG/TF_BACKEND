@@ -16,6 +16,22 @@ The Flutter app must NOT call:
 
 All third-party provider integrations must happen only on the backend.
 
+## Provider Integration Policy
+
+Lync is the backend provider integration for DVA, wallet funding verification, NGN bank/account validation, NGN transfer submission, FX quotes, and USD/CNY payouts when `LYNC_ENABLED=true`.
+
+When `LYNC_ENABLED=false`, the backend must use `MockLyncProvider` with the same Transfa request/response formats and `provider=mock_lync` in backend metadata.
+
+The Flutter app must not receive Lync credentials, raw Lync payloads, or Lync endpoint paths. Mobile routes remain business routes such as `/wallet/dva/create`, `/funding/verify`, `/transfers/ngn/quote`, `/transfers/ngn/confirm`, `/transfers/usd/quote`, and `/transfers/cny/confirm`.
+
+Provider callbacks use:
+
+```text
+POST /api/v1/webhooks/lync
+```
+
+The Lync webhook route is not JWT-protected. It must verify the provider signature using `LYNC_WEBHOOK_SECRET`, store a `WebhookLog`, normalize the event, enforce idempotency, and then update Transfa ledger/transaction state. Duplicate valid webhooks must return success without repeating wallet credit or reversal.
+
 ---
 
 # Base URLs
@@ -184,6 +200,20 @@ This checks/verifies the user's phone number and prepares registration.
 
 POST /auth/register/complete
 
+This endpoint creates the real TF user account only after pre-registration KYC has been completed successfully with the same `registrationToken`.
+
+If BVN or selfie verification has not passed, the backend returns:
+
+```JSON
+{
+  "success": false,
+  "message": "KYC verification is required to complete registration",
+  "error": {
+    "code": "REGISTRATION_KYC_REQUIRED"
+  }
+}
+```
+
 ### Request
 ```JSON
 {
@@ -203,8 +233,68 @@ POST /auth/register/complete
       "id": "usr_12345",
       "phoneNumber": "2348103100000",
       "kycStatus": "verified",
-      "walletStatus": "inactive"
+      "walletStatus": "active"
     }
+  }
+}
+```
+
+## Pre-registration BVN Verification
+
+POST /auth/register/kyc/bvn/verify
+
+This endpoint verifies BVN during onboarding before a JWT exists. It is scoped by `registrationToken`; it is not a public unscoped KYC endpoint.
+
+### Request
+```JSON
+{
+  "registrationToken": "reg_temp_12345",
+  "bvn": "12345678901"
+}
+```
+
+### Success Response
+```JSON
+{
+  "success": true,
+  "message": "BVN verified successfully",
+  "data": {
+    "kycReference": "kyc_ref_12345",
+    "bvnVerified": true,
+    "firstName": "John",
+    "lastName": "Musa",
+    "email": "test@test.com",
+    "dateOfBirth": "1990-01-01",
+    "country": "NG"
+  }
+}
+```
+
+## Pre-registration Selfie Validation
+
+POST /auth/register/kyc/selfie-validate
+
+This endpoint validates the selfie during onboarding before a JWT exists. The backend uploads the selfie to secure Cloudinary storage, keeps only the secure URL in the temporary registration session, and attaches that image to the user profile when registration completes.
+
+### Request
+```JSON
+{
+  "registrationToken": "reg_temp_12345",
+  "kycReference": "kyc_ref_12345",
+  "selfieImageBase64": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAgAAAQABAAD..."
+}
+```
+
+### Success Response
+```JSON
+{
+  "success": true,
+  "message": "Selfie validation successful",
+  "data": {
+    "kycStatus": "verified",
+    "faceMatch": true,
+    "confidenceScore": 98.5,
+    "profileImageUrl": "https://res.cloudinary.com/transfa/image/upload/tf/users/kyc-selfies/kyc_ref_12345.jpg"
   }
 }
 ```

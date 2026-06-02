@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { forwardRef, Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
 import { PrismaModule } from "../prisma/prisma.module";
 import { RedisModule } from "../redis/redis.module";
@@ -8,7 +8,7 @@ import { CashDropFingerprintService } from "./cash-drop-fingerprint.service";
 import { CashDropService } from "./cash-drop.service";
 
 @Module({
-  imports: [AuthModule, PrismaModule, RedisModule],
+  imports: [forwardRef(() => AuthModule), PrismaModule, RedisModule],
   controllers: [CashDropController, AdminCashDropController],
   providers: [CashDropService, CashDropFingerprintService],
   exports: [CashDropService]

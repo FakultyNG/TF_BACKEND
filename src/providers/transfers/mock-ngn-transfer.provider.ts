@@ -41,6 +41,7 @@ export class MockNgnTransferProvider implements NgnTransferProviderService {
   async submitTransfer(input: { reference: string }): Promise<NgnTransferResult> {
     return {
       status: "processing",
+      provider: "mock_lync",
       providerReference: `mock_ngn_${input.reference}`,
       raw: { submitted: true }
     };

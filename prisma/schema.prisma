@@ -220,6 +220,8 @@ model DedicatedVirtualAccount {
   @@unique([provider, accountNumber])
   @@index([userId])
   @@index([status])
+  @@index([provider])
+  @@index([providerReference])
 }
 
 model CashDropProfile {
@@ -258,6 +260,7 @@ model Transaction {
   reference         String            @unique
   provider          String?
   providerReference String?
+  providerStatus    String?
   description       String?
   narration         String?
   idempotencyKey    String?           @unique
@@ -275,6 +278,8 @@ model Transaction {
   @@index([userId])
   @@index([type])
   @@index([status])
+  @@index([provider])
+  @@index([providerReference])
   @@index([createdAt])
 }
 
@@ -357,6 +362,7 @@ model ProviderLog {
   status            String
   requestPayload    Json?
   responsePayload   Json?
+  errorMessage      String?
   createdAt         DateTime @default(now())
 
   @@index([provider])

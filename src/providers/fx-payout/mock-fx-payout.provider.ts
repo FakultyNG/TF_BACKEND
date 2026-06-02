@@ -21,6 +21,7 @@ export class MockFxPayoutProvider implements FxPayoutProviderService {
   async submitPayout(input: { reference: string; payoutCurrency: "USD" | "CNY" }): Promise<FxPayoutResult> {
     return {
       status: "processing",
+      provider: "mock_lync",
       providerReference: `mock_${input.payoutCurrency.toLowerCase()}_${input.reference}`,
       raw: { submitted: true }
     };

@@ -26,6 +26,7 @@ export class MockDvaProvider implements DvaProviderService {
       amount: 50000,
       currency: "NGN",
       status: "successful",
+      provider: "mock_lync",
       providerReference: `mock_funding_${reference}`,
       raw: { mocked: true }
     };
