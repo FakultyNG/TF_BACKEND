@@ -26,6 +26,7 @@ const kycProviderFactory = (config: ConfigService, prembly: PremblyKycProvider, 
   imports: [LyncModule, PremblyModule],
   providers: [
     { provide: OTP_PROVIDER, useClass: MockOtpProvider },
+    MockKycProvider,
     {
       provide: KYC_PROVIDER,
       useFactory: kycProviderFactory,
