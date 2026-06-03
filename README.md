@@ -163,6 +163,7 @@ For Render staging, use `SWAGGER_ENABLED=true`, `SWAGGER_BASIC_AUTH_ENABLED=true
 - Cloudinary is the official file storage adapter. Local development without credentials returns mock secure URLs and does not store files on disk.
 - Firebase Cloud Messaging is push delivery only. TF database notifications remain the source of truth.
 - Local `.env` can keep `FCM_ENABLED=false` to avoid real Firebase sends while developing. Set it to `true` with Firebase credentials to send live pushes.
+- KYC provider is selected server-side with `KYC_PROVIDER`. Use `mock` locally or `prembly` with real Prembly credentials on staging/production.
 - Refresh tokens are stored only as bcrypt hashes in PostgreSQL.
 - Passcodes are stored only as bcrypt hashes in PostgreSQL.
 - BVN is stored as a SHA-256 hash, not plain text.
@@ -190,6 +191,19 @@ POST /api/v1/auth/register/complete
 ```
 
 Use `MOCK_OTP_CODE=123456`. The mock KYC provider accepts any 11-digit BVN. Registration completion now requires the pre-registration BVN and selfie endpoints to pass for the same `registrationToken`.
+
+For Prembly KYC, set:
+
+```env
+KYC_PROVIDER=prembly
+PREMBLY_BASE_URL=https://api.prembly.com
+PREMBLY_API_KEY=<from Prembly dashboard>
+PREMBLY_APP_ID=<from Prembly dashboard>
+PREMBLY_WEBHOOK_SECRET=<your configured webhook secret>
+KYC_FACE_MATCH_THRESHOLD=95
+```
+
+The mobile endpoints do not change. TF backend calls Prembly BVN Advance and BVN + Face Validation, stores only hashed/masked BVN/NIN values in PostgreSQL, keeps the raw BVN only in Redis for the temporary KYC/session TTL needed between BVN and selfie validation, and stores sanitized provider responses in `ProviderLog`.
 
 3. Click `Authorize` in Swagger and paste only the access token value, without `Bearer`.
 
@@ -324,6 +338,7 @@ Webhook endpoints are provider-facing only. The Flutter app should never call th
 ```text
 POST /api/v1/webhooks/lync
 POST /api/v1/webhooks/dojah
+POST /api/v1/webhooks/prembly
 POST /api/v1/webhooks/payout-provider
 POST /api/v1/webhooks/reeplay
 ```

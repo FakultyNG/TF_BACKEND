@@ -7,6 +7,7 @@ import { DojahWebhookService } from "./dojah/dojah-webhook.service";
 import { GiftCardProviderWebhookService } from "./gift-card-provider/gift-card-provider-webhook.service";
 import { LyncWebhookService } from "./lync/lync-webhook.service";
 import { PayoutProviderWebhookService } from "./payout-provider/payout-provider-webhook.service";
+import { PremblyWebhookService } from "./prembly/prembly-webhook.service";
 import { WebhookLogService } from "./common/webhook-log.service";
 import { WebhookLogQueryDto } from "./dto/webhook-log-query.dto";
 
@@ -17,6 +18,7 @@ export class AdminWebhooksService {
     private readonly logs: WebhookLogService,
     private readonly lync: LyncWebhookService,
     private readonly dojah: DojahWebhookService,
+    private readonly prembly: PremblyWebhookService,
     private readonly payout: PayoutProviderWebhookService,
     private readonly giftCards: GiftCardProviderWebhookService
   ) {}
@@ -92,6 +94,7 @@ export class AdminWebhooksService {
   private dispatchRetry(provider: string, id: string) {
     if (provider === "lync") return this.lync.retry(id);
     if (provider === "dojah") return this.dojah.retry(id);
+    if (provider === "prembly") return this.prembly.retry(id);
     if (provider === "payout-provider") return this.payout.retry(id);
     if (provider === "reeplay") return this.giftCards.retry(id);
     throw new ApiException("Unsupported webhook provider", "UNSUPPORTED_WEBHOOK_PROVIDER", HttpStatus.BAD_REQUEST);

@@ -36,6 +36,7 @@ describe("pre-registration KYC onboarding", () => {
         create: jest.fn().mockResolvedValue({ id: "session_1" }),
         update: jest.fn().mockResolvedValue({})
       },
+      providerLog: { create: jest.fn().mockResolvedValue({ id: "provider_log_1" }) },
       auditLog: { create: jest.fn().mockResolvedValue({}) }
     };
     const usersRepository = {
@@ -82,17 +83,27 @@ describe("pre-registration KYC onboarding", () => {
     };
     const kycProvider = {
       verifyBvn: jest.fn().mockResolvedValue({
+        provider: "mock",
+        providerReference: "mock_ref_1",
+        bvnMasked: "*******8901",
         bvnVerified: true,
         firstName: "Ada",
         lastName: "Lovelace",
         email: "ada@example.com",
         dateOfBirth: "1990-01-01",
-        country: "NG"
+        country: "NG",
+        rawProviderResponse: { status: true }
       }),
-      validateSelfie: jest.fn().mockResolvedValue({
+      verifyBvnWithSelfie: jest.fn().mockResolvedValue({
+        provider: "mock",
+        providerReference: "mock_ref_2",
+        bvnMasked: "*******8901",
+        bvnVerified: true,
         faceMatch: true,
+        selfieVerified: true,
         confidenceScore: 98.5,
-        profileImageUrl: "https://provider.example/selfie.jpg"
+        profileImageUrl: "https://provider.example/selfie.jpg",
+        rawProviderResponse: { status: true }
       })
     };
     const cloudinary = {
@@ -133,12 +144,14 @@ describe("pre-registration KYC onboarding", () => {
       firstName: "Ada"
     });
 
-    expect(kycProvider.verifyBvn).toHaveBeenCalledWith("12345678901");
+    expect(kycProvider.verifyBvn).toHaveBeenCalledWith("12345678901", `registration:${registrationToken}`);
     expect(redis.setJson).toHaveBeenCalledWith(
       registrationKey,
       expect.objectContaining({
         kyc: expect.objectContaining({
           bvnHash: expect.any(String),
+          bvnMasked: "*******8901",
+          bvn: "12345678901",
           bvnVerified: true,
           status: KycStatus.bvn_verified
         })
@@ -160,7 +173,8 @@ describe("pre-registration KYC onboarding", () => {
     });
 
     expect(cloudinary.uploadBase64Image).toHaveBeenCalledWith(selfie, "tf/users/kyc-selfies", `${bvn.kycReference}.jpg`);
-    expect(kycProvider.validateSelfie).toHaveBeenCalledWith(bvn.kycReference, "aGVsbG8=");
+    expect(kycProvider.verifyBvnWithSelfie).toHaveBeenCalledWith("12345678901", "aGVsbG8=", `registration:${registrationToken}`);
+    expect((redisStore.get(registrationKey) as { kyc: { bvn?: string; selfieImageUrl: string } }).kyc.bvn).toBeUndefined();
     expect((redisStore.get(registrationKey) as { kyc: { selfieImageUrl: string } }).kyc.selfieImageUrl).toBe(
       "https://res.cloudinary.com/tf/selfie.jpg"
     );
@@ -186,6 +200,8 @@ describe("pre-registration KYC onboarding", () => {
         data: expect.objectContaining({
           userId: "user_1",
           kycReference: bvn.kycReference,
+          provider: "mock",
+          providerReference: "mock_ref_2",
           bvnVerified: true,
           selfieVerified: true,
           status: KycStatus.verified

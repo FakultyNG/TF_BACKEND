@@ -17,6 +17,8 @@ import { LyncNgnTransferHandler } from "./lync/handlers/lync-ngn-transfer.handle
 import { LyncPayoutHandler } from "./lync/handlers/lync-payout.handler";
 import { LyncWebhookController } from "./lync/lync-webhook.controller";
 import { LyncWebhookService } from "./lync/lync-webhook.service";
+import { PremblyWebhookController } from "./prembly/prembly-webhook.controller";
+import { PremblyWebhookService } from "./prembly/prembly-webhook.service";
 import { PayoutProviderWebhookController } from "./payout-provider/payout-provider-webhook.controller";
 import { PayoutProviderWebhookService } from "./payout-provider/payout-provider-webhook.service";
 
@@ -25,6 +27,7 @@ import { PayoutProviderWebhookService } from "./payout-provider/payout-provider-
   controllers: [
     LyncWebhookController,
     DojahWebhookController,
+    PremblyWebhookController,
     PayoutProviderWebhookController,
     GiftCardProviderWebhookController,
     AdminWebhooksController
@@ -38,6 +41,7 @@ import { PayoutProviderWebhookService } from "./payout-provider/payout-provider-
     LyncPayoutHandler,
     LyncWebhookService,
     DojahWebhookService,
+    PremblyWebhookService,
     PayoutProviderWebhookService,
     GiftCardProviderWebhookService,
     AdminWebhooksService

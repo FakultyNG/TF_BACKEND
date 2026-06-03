@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { TransactionStatus, TransactionType, UserRole } from "@prisma/client";
 import { AuthService } from "../auth/auth.service";
@@ -15,6 +15,7 @@ import { GiftCardsService } from "../gift-cards/gift-cards.service";
 import { PricingService } from "../pricing/pricing.service";
 import { FeeConfigKey } from "../pricing/pricing.types";
 import { AdminDvaQueryDto } from "./dto/admin-dva-query.dto";
+import { AdminKycRecordQueryDto } from "./dto/admin-kyc-record-query.dto";
 import { AdminPaginationDto } from "./dto/admin-pagination.dto";
 import { AdminReasonDto } from "./dto/admin-reason.dto";
 import { AdminTransactionQueryDto } from "./dto/admin-transaction-query.dto";
@@ -65,11 +66,20 @@ export class AdminController {
 
   @ApiBearerAuth()
   @UseGuards(AdminJwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @Delete("users/:userId")
+  async deleteUser(@CurrentUser() admin: { sub: string }, @Param("userId") userId: string, @Body() dto: AdminReasonDto) {
+    const data = await this.adminService.deleteUser(admin.sub, userId, dto.reason);
+    return success("User deleted successfully", data);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(AdminJwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.COMPLIANCE, UserRole.SUPER_ADMIN)
   @Get("kyc-records")
-  async kycRecords(@CurrentUser() admin: { sub: string }, @Query() query: AdminPaginationDto) {
+  async kycRecords(@CurrentUser() admin: { sub: string }, @Query() query: AdminKycRecordQueryDto) {
     await this.adminService.auditAdminView(admin.sub, "ADMIN_KYC_RECORDS_VIEWED", "KycRecord");
-    const data = await this.kycService.listRecords(query.take ?? 50, query.skip ?? 0);
+    const data = await this.kycService.listRecords(query.take ?? 50, query.skip ?? 0, query.provider);
     return success("KYC records fetched successfully", data);
   }
 

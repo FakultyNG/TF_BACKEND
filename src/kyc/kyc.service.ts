@@ -25,16 +25,32 @@ export class KycService {
   ) {}
 
   async verifyBvn(userId: string, bvn: string) {
-    const result = await this.kycProvider.verifyBvn(bvn);
+    const result = await this.kycProvider.verifyBvn(bvn, userId);
     const kycReference = `kyc_ref_${uuid().replace(/-/g, "").slice(0, 12)}`;
+    const providerLogId = await this.logKycProvider(result.provider, "kyc_bvn_verify", kycReference, result.providerReference, result.bvnVerified ? "success" : "failed", result.rawProviderResponse);
     await this.prisma.$transaction([
       this.prisma.kycRecord.create({
         data: {
           userId,
           kycReference,
+          provider: result.provider,
+          providerReference: result.providerReference,
           bvnHash: sha256(bvn),
+          bvnMasked: result.bvnMasked,
           bvnVerified: result.bvnVerified,
-          status: KycStatus.bvn_verified,
+          status: result.bvnVerified ? KycStatus.bvn_verified : KycStatus.rejected,
+          firstName: result.firstName,
+          middleName: result.middleName,
+          lastName: result.lastName,
+          email: result.email,
+          phoneNumber: result.phoneNumber,
+          dateOfBirth: parseProviderDate(result.dateOfBirth),
+          gender: result.gender,
+          country: result.country,
+          ninMasked: result.ninMasked,
+          ninHash: result.ninHash,
+          imageUrl: result.imageUrl,
+          rawProviderLogId: providerLogId,
           metadata: result as unknown as Prisma.InputJsonObject
         }
       }),
@@ -45,14 +61,16 @@ export class KycService {
           firstName: result.firstName,
           lastName: result.lastName,
           email: result.email,
-          dateOfBirth: new Date(result.dateOfBirth),
+          dateOfBirth: parseProviderDate(result.dateOfBirth),
+          gender: result.gender,
           country: result.country
         },
         update: {
           firstName: result.firstName,
           lastName: result.lastName,
           email: result.email,
-          dateOfBirth: new Date(result.dateOfBirth),
+          dateOfBirth: parseProviderDate(result.dateOfBirth),
+          gender: result.gender,
           country: result.country
         }
       }),
@@ -62,17 +80,20 @@ export class KycService {
     ]);
     await this.redis.setJson(
       `kyc-temp:${kycReference}`,
-      { userId, kycReference, bvnVerified: true },
+      { userId, kycReference, bvn, bvnVerified: result.bvnVerified },
       Number(this.config.get<string>("REGISTRATION_TTL_SECONDS", "900"))
     );
     return { kycReference, ...result };
   }
 
   async validateSelfie(userId: string, kycReference: string, selfieImageBase64: string) {
-    const tempSession = await this.redis.getJson<{ userId: string; bvnVerified: boolean }>(`kyc-temp:${kycReference}`);
+    const tempSession = await this.redis.getJson<{ userId: string; bvn?: string; bvnVerified: boolean }>(`kyc-temp:${kycReference}`);
     const record = await this.prisma.kycRecord.findUnique({ where: { kycReference } });
     if (!record || record.userId !== userId || (tempSession && tempSession.userId !== userId)) {
       throw new ApiException("KYC record not found", "KYC_RECORD_NOT_FOUND", HttpStatus.NOT_FOUND);
+    }
+    if (!tempSession?.bvn || !tempSession.bvnVerified) {
+      throw new ApiException("KYC BVN verification session expired", "KYC_BVN_SESSION_EXPIRED", HttpStatus.BAD_REQUEST);
     }
     const cleaned = selfieImageBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
     const uploadedSelfie = await this.cloudinaryService.uploadBase64Image(
@@ -80,15 +101,35 @@ export class KycService {
       "tf/users/kyc-selfies",
       `${kycReference}.jpg`
     );
-    const result = await this.kycProvider.validateSelfie(kycReference, cleaned);
+    const result = await this.kycProvider.verifyBvnWithSelfie(tempSession.bvn, cleaned, userId);
+    const providerLogId = await this.logKycProvider(result.provider, "kyc_bvn_face_validate", kycReference, result.providerReference, result.faceMatch ? "success" : "failed", result.rawProviderResponse);
+    const profileImageUrl = result.faceMatch ? uploadedSelfie.secureUrl : result.profileImageUrl;
     await this.prisma.$transaction([
       this.prisma.kycRecord.update({
         where: { kycReference },
         data: {
-          selfieVerified: result.faceMatch,
+          provider: result.provider,
+          providerReference: result.providerReference ?? record.providerReference,
+          bvnMasked: result.bvnMasked ?? record.bvnMasked,
+          bvnVerified: result.bvnVerified,
+          selfieVerified: result.selfieVerified,
           faceMatch: result.faceMatch,
           confidenceScore: result.confidenceScore,
           status: result.faceMatch ? KycStatus.verified : KycStatus.rejected,
+          firstName: result.firstName ?? record.firstName,
+          middleName: result.middleName ?? record.middleName,
+          lastName: result.lastName ?? record.lastName,
+          email: result.email ?? record.email,
+          phoneNumber: result.phoneNumber ?? record.phoneNumber,
+          dateOfBirth: parseProviderDate(result.dateOfBirth) ?? record.dateOfBirth,
+          gender: result.gender ?? record.gender,
+          country: result.country ?? record.country,
+          ninMasked: result.ninMasked ?? record.ninMasked,
+          ninHash: result.ninHash ?? record.ninHash,
+          imageUrl: result.imageUrl ?? record.imageUrl,
+          profileImageUrl,
+          rawProviderLogId: providerLogId,
+          verifiedAt: result.faceMatch ? new Date() : undefined,
           metadata: {
             ...((record.metadata as object) ?? {}),
             selfie: result,
@@ -99,7 +140,15 @@ export class KycService {
       }),
       this.prisma.profile.updateMany({
         where: { userId },
-        data: { profileImageUrl: result.faceMatch ? uploadedSelfie.secureUrl : result.profileImageUrl }
+        data: {
+          firstName: result.firstName ?? undefined,
+          lastName: result.lastName ?? undefined,
+          email: result.email ?? undefined,
+          dateOfBirth: parseProviderDate(result.dateOfBirth),
+          gender: result.gender ?? undefined,
+          country: result.country ?? undefined,
+          profileImageUrl
+        }
       }),
       this.prisma.user.update({
         where: { id: userId },
@@ -115,7 +164,7 @@ export class KycService {
       kycStatus: result.faceMatch ? "verified" : "rejected",
       faceMatch: result.faceMatch,
       confidenceScore: result.confidenceScore,
-      profileImageUrl: result.faceMatch ? uploadedSelfie.secureUrl : result.profileImageUrl
+      profileImageUrl
     };
   }
 
@@ -126,14 +175,16 @@ export class KycService {
     });
     return {
       kycStatus: record?.status ?? "not_started",
+      provider: record?.provider,
       bvnVerified: record?.bvnVerified ?? false,
       selfieVerified: record?.selfieVerified ?? false,
       walletEligible: record?.status === KycStatus.verified
     };
   }
 
-  listRecords(take = 50, skip = 0) {
+  listRecords(take = 50, skip = 0, provider?: string) {
     return this.prisma.kycRecord.findMany({
+      where: provider ? { provider } : undefined,
       take,
       skip,
       include: { user: { select: { id: true, phoneNumber: true, role: true, status: true } } },
@@ -142,7 +193,10 @@ export class KycService {
   }
 
   async updateStatus(adminId: string, id: string, status: KycStatus) {
-    const record = await this.prisma.kycRecord.update({ where: { id }, data: { status } });
+    const record = await this.prisma.kycRecord.update({
+      where: { id },
+      data: { status, verifiedAt: status === KycStatus.verified ? new Date() : undefined }
+    });
     await this.prisma.auditLog.create({
       data: {
         actorId: adminId,
@@ -154,6 +208,27 @@ export class KycService {
       }
     });
     return record;
+  }
+
+  private async logKycProvider(
+    provider: string,
+    operation: string,
+    requestReference: string,
+    providerReference: string | undefined,
+    status: string,
+    responsePayload: unknown
+  ) {
+    const log = await this.prisma.providerLog.create({
+      data: {
+        provider,
+        operation,
+        requestReference,
+        providerReference,
+        status,
+        responsePayload: (responsePayload ?? {}) as Prisma.InputJsonValue
+      }
+    });
+    return log.id;
   }
 
   private async autoProvisionAfterKycVerified(userId: string, selfieImageBase64: string) {
@@ -198,4 +273,10 @@ export class KycService {
       };
     }
   }
+}
+
+function parseProviderDate(value?: string) {
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }

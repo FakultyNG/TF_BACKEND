@@ -3,7 +3,10 @@ import { BvnVerificationResult, SelfieValidationResult } from "../../providers/i
 
 export interface RegistrationKycState {
   kycReference: string;
+  providerReference?: string;
   bvnHash: string;
+  bvnMasked?: string;
+  bvn?: string;
   bvnVerified: boolean;
   status: KycStatus;
   providerResult: BvnVerificationResult;

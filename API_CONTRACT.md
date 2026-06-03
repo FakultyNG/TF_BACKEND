@@ -8,7 +8,7 @@ The Flutter app must only call TF backend APIs.
 
 The Flutter app must NOT call:
 - Lync directly
-- Dojah directly
+- Prembly or any KYC provider directly
 - Flutterwave directly
 - Bill payment providers directly
 - Gift card providers directly
@@ -28,9 +28,10 @@ Provider callbacks use:
 
 ```text
 POST /api/v1/webhooks/lync
+POST /api/v1/webhooks/prembly
 ```
 
-The Lync webhook route is not JWT-protected. It must verify the provider signature using `LYNC_WEBHOOK_SECRET`, store a `WebhookLog`, normalize the event, enforce idempotency, and then update Transfa ledger/transaction state. Duplicate valid webhooks must return success without repeating wallet credit or reversal.
+Provider webhook routes are not JWT-protected. They must verify the provider signature using the matching webhook secret, store a `WebhookLog`, normalize the event, enforce idempotency, and then update Transfa ledger/transaction/KYC state. Duplicate valid webhooks must return success without repeating wallet credit, reversal, or KYC activation.
 
 ---
 
@@ -304,9 +305,19 @@ This endpoint validates the selfie during onboarding before a JWT exists. The ba
 
 BVN verification is required before DVA creation, wallet activation, wallet funding, and transfers.
 
-Current KYC provider: Dojah or any backend-selected KYC provider.
+Current KYC provider: backend-selected provider. `KYC_PROVIDER=prembly` uses Prembly server-side; `KYC_PROVIDER=mock` is for local development.
 
 The frontend must not call KYC providers directly.
+The frontend must not call Prembly directly.
+
+Prembly server-side implementation:
+
+- BVN Advance: `POST {PREMBLY_BASE_URL}/verification/bvn`
+- BVN + Face Validation: `POST {PREMBLY_BASE_URL}/verification/bvn_w_face`
+- Status lookup: `GET {PREMBLY_BASE_URL}/verification/:id/status`
+- Headers are sent server-side only: `app-id`, `x-api-key`, and JSON content headers.
+- `KYC_FACE_MATCH_THRESHOLD` defaults to `95`.
+- PostgreSQL stores BVN/NIN hashes or masked values only. Plain BVN is kept only in Redis for the short temporary KYC/session TTL needed between BVN verification and selfie validation.
 
 
 1. Verify BVN
@@ -346,7 +357,7 @@ The frontend captures the selfie image and sends it to TF backend.
 
 TF backend cleans the base64 image and calls the KYC provider.
 
-The frontend must not call Dojah directly.
+The frontend must not call Prembly or any provider directly.
 
 ## Request
 
@@ -381,6 +392,7 @@ GET /kyc/status
   "message": "KYC status fetched successfully",
   "data": {
     "kycStatus": "verified",
+    "provider": "prembly",
     "bvnVerified": true,
     "selfieVerified": true,
     "walletEligible": true
@@ -2277,6 +2289,96 @@ file: image/file upload
 5. Backend uploads files to Cloudinary or secure storage.
 6. Frontend sends returned attachmentUrl when creating/replying to ticket.
 7. Do not store files permanently on local server.
+```
+
+---
+
+# ADMIN KYC MANAGEMENT
+
+Admin endpoints require admin JWT:
+
+```http
+Authorization: Bearer admin_access_token
+```
+
+## List KYC Records
+
+`GET /admin/kyc-records`
+
+Optional query parameters:
+
+- `take`
+- `skip`
+- `provider` such as `prembly`, `mock`, or legacy provider values
+
+The response includes provider metadata, provider reference, BVN/selfie status, confidence score, masked BVN/NIN values, identity fields returned by the backend provider adapter, and the related user summary.
+
+# ADMIN USER MANAGEMENT
+
+Admin endpoints require admin JWT:
+
+```text
+Authorization: Bearer admin_access_token
+```
+
+## Delete User
+
+`DELETE /admin/users/:userId`
+
+This endpoint is restricted to `SUPER_ADMIN`.
+
+Deletion is a backend soft delete. The backend does not hard-delete the user row or financial history. It:
+- sets `user.status = disabled`
+- sets `user.walletStatus = inactive`
+- revokes active auth sessions
+- deactivates FCM device tokens
+- disables trusted biometric devices
+- inactivates active DVA records
+- disables CashDrop profile
+- writes an admin audit log
+
+### Request
+
+```json
+{
+  "reason": "User requested account deletion"
+}
+```
+
+### Success Response
+
+```json
+{
+  "success": true,
+  "message": "User deleted successfully",
+  "data": {
+    "deleted": true,
+    "userId": "usr_12345",
+    "status": "disabled"
+  }
+}
+```
+
+### Error Responses
+
+```json
+{
+  "success": false,
+  "message": "User not found",
+  "error": {
+    "code": "USER_NOT_FOUND"
+  }
+}
+```
+
+```json
+{
+  "success": false,
+  "message": "Admin cannot delete their own account",
+  "error": {
+    "code": "ADMIN_CANNOT_DELETE_SELF"
+  }
+}
 ```
 
 

@@ -25,6 +25,7 @@ export class WebhookSignatureService {
       "x-webhook-signature",
       "x-lync-signature",
       "x-dojah-signature",
+      "x-prembly-signature",
       "x-payout-signature",
       "x-reeplay-signature"
     ];

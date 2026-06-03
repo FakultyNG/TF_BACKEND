@@ -61,13 +61,16 @@ export class AuthService {
 
   async verifyRegistrationBvn(registrationToken: string, bvn: string) {
     const { session, ttl } = await this.getRegistrationSession(registrationToken);
-    const result = await this.kycProvider.verifyBvn(bvn);
+    const result = await this.kycProvider.verifyBvn(bvn, `registration:${registrationToken}`);
     const kycReference = `kyc_ref_${uuid().replace(/-/g, "").slice(0, 12)}`;
     const kyc: RegistrationKycState = {
       kycReference,
+      providerReference: result.providerReference,
       bvnHash: sha256(bvn),
+      bvnMasked: result.bvnMasked,
+      bvn,
       bvnVerified: result.bvnVerified,
-      status: KycStatus.bvn_verified,
+      status: result.bvnVerified ? KycStatus.bvn_verified : KycStatus.rejected,
       providerResult: result
     };
     await this.redis.setJson(`registration:${registrationToken}`, { ...session, kyc }, ttl);
@@ -85,10 +88,17 @@ export class AuthService {
       "tf/users/kyc-selfies",
       `${kycReference}.jpg`
     );
-    const result = await this.kycProvider.validateSelfie(kycReference, cleaned);
+    if (!session.kyc.bvn) {
+      throw new ApiException("Registration KYC BVN verification session expired", "REGISTRATION_KYC_BVN_SESSION_EXPIRED", HttpStatus.BAD_REQUEST);
+    }
+    const result = await this.kycProvider.verifyBvnWithSelfie(session.kyc.bvn, cleaned, `registration:${registrationToken}`);
     const kyc: RegistrationKycState = {
       ...session.kyc,
-      selfieVerified: result.faceMatch,
+      bvn: undefined,
+      providerReference: result.providerReference ?? session.kyc.providerReference,
+      bvnMasked: result.bvnMasked ?? session.kyc.bvnMasked,
+      providerResult: { ...session.kyc.providerResult, ...result },
+      selfieVerified: result.selfieVerified,
       faceMatch: result.faceMatch,
       confidenceScore: result.confidenceScore,
       status: result.faceMatch ? KycStatus.verified : KycStatus.rejected,
@@ -287,17 +297,45 @@ export class AuthService {
 
   private async attachRegistrationKyc(userId: string, kyc: RegistrationKycState) {
     const profile = kyc.providerResult;
+    const providerLogId = await this.logKycProvider(
+      profile.provider,
+      "registration_kyc",
+      kyc.kycReference,
+      kyc.providerReference,
+      kyc.status === KycStatus.verified ? "success" : "failed",
+      {
+        bvn: profile.rawProviderResponse,
+        selfie: kyc.selfieResult?.rawProviderResponse
+      }
+    );
     await this.prisma.$transaction([
       this.prisma.kycRecord.create({
         data: {
           userId,
           kycReference: kyc.kycReference,
+          provider: profile.provider,
+          providerReference: kyc.providerReference,
           bvnHash: kyc.bvnHash,
+          bvnMasked: kyc.bvnMasked,
           bvnVerified: kyc.bvnVerified,
           selfieVerified: kyc.selfieVerified ?? false,
           faceMatch: kyc.faceMatch ?? false,
           confidenceScore: kyc.confidenceScore,
           status: kyc.status,
+          firstName: profile.firstName,
+          middleName: profile.middleName,
+          lastName: profile.lastName,
+          email: profile.email,
+          phoneNumber: profile.phoneNumber,
+          dateOfBirth: parseProviderDate(profile.dateOfBirth),
+          gender: profile.gender,
+          country: profile.country,
+          ninMasked: profile.ninMasked,
+          ninHash: profile.ninHash,
+          imageUrl: profile.imageUrl,
+          profileImageUrl: kyc.selfieImageUrl ?? kyc.selfieResult?.profileImageUrl,
+          rawProviderLogId: providerLogId,
+          verifiedAt: kyc.status === KycStatus.verified ? new Date() : undefined,
           metadata: {
             ...profile,
             selfie: kyc.selfieResult,
@@ -313,7 +351,8 @@ export class AuthService {
           firstName: profile.firstName,
           lastName: profile.lastName,
           email: profile.email,
-          dateOfBirth: new Date(profile.dateOfBirth),
+          dateOfBirth: parseProviderDate(profile.dateOfBirth),
+          gender: profile.gender,
           country: profile.country,
           profileImageUrl: kyc.selfieImageUrl ?? kyc.selfieResult?.profileImageUrl
         },
@@ -321,7 +360,8 @@ export class AuthService {
           firstName: profile.firstName,
           lastName: profile.lastName,
           email: profile.email,
-          dateOfBirth: new Date(profile.dateOfBirth),
+          dateOfBirth: parseProviderDate(profile.dateOfBirth),
+          gender: profile.gender,
           country: profile.country,
           profileImageUrl: kyc.selfieImageUrl ?? kyc.selfieResult?.profileImageUrl
         }
@@ -340,6 +380,27 @@ export class AuthService {
         }
       })
     ]);
+  }
+
+  private async logKycProvider(
+    provider: string,
+    operation: string,
+    requestReference: string,
+    providerReference: string | undefined,
+    status: string,
+    responsePayload: unknown
+  ) {
+    const log = await this.prisma.providerLog.create({
+      data: {
+        provider,
+        operation,
+        requestReference,
+        providerReference,
+        status,
+        responsePayload: (responsePayload ?? {}) as Prisma.InputJsonValue
+      }
+    });
+    return log.id;
   }
 
   private async autoProvisionAfterRegistrationKyc(userId: string) {
@@ -384,4 +445,10 @@ export class AuthService {
       }
     });
   }
+}
+
+function parseProviderDate(value?: string) {
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }

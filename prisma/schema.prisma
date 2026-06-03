@@ -570,24 +570,43 @@ model SecurityAudit {
 }
 
 model KycRecord {
-  id              String    @id @default(cuid())
-  userId          String
-  kycReference    String    @unique
-  bvnHash         String?
-  bvnVerified     Boolean   @default(false)
-  selfieVerified  Boolean   @default(false)
-  faceMatch       Boolean   @default(false)
-  confidenceScore Decimal?  @db.Decimal(8, 4)
-  status          KycStatus @default(pending)
-  provider        String    @default("mock")
-  metadata        Json?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  userId             String
+  kycReference       String    @unique
+  providerReference  String?
+  bvnHash            String?
+  bvnMasked          String?
+  bvnVerified        Boolean   @default(false)
+  selfieVerified     Boolean   @default(false)
+  faceMatch          Boolean   @default(false)
+  confidenceScore    Decimal?  @db.Decimal(8, 4)
+  firstName          String?
+  middleName         String?
+  lastName           String?
+  email              String?
+  phoneNumber        String?
+  dateOfBirth        DateTime?
+  gender             String?
+  country            String?
+  ninMasked          String?
+  ninHash            String?
+  imageUrl           String?
+  profileImageUrl    String?
+  rawProviderLogId   String?
+  verifiedAt         DateTime?
+  status             KycStatus @default(pending)
+  provider           String    @default("mock")
+  metadata           Json?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([status])
+  @@index([provider])
+  @@index([providerReference])
+  @@index([bvnHash])
 }
 
 model AuthSession {
