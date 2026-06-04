@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, Patch, Post, Req, UseGuards } from "@nestjs/common";
-import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiExcludeEndpoint, ApiTags } from "@nestjs/swagger";
 import { Request } from "express";
 import { success } from "../common/api-response";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
@@ -33,12 +33,14 @@ export class AuthController {
   }
 
   @Post("register/kyc/bvn/verify")
+  @ApiExcludeEndpoint()
   async verifyRegistrationBvn(@Body() dto: RegisterKycBvnDto) {
     const data = await this.authService.verifyRegistrationBvn(dto.registrationToken, dto.bvn);
     return success("BVN verified successfully", data);
   }
 
   @Post("register/kyc/selfie-validate")
+  @ApiExcludeEndpoint()
   async validateRegistrationSelfie(@Body() dto: RegisterKycSelfieDto) {
     const data = await this.authService.validateRegistrationSelfie(dto.registrationToken, dto.kycReference, dto.selfieImageBase64);
     return success("Selfie validation successful", data);

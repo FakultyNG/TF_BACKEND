@@ -150,8 +150,10 @@ For Render staging, use `SWAGGER_ENABLED=true`, `SWAGGER_BASIC_AUTH_ENABLED=true
 ## Development Notes
 
 - `MOCK_OTP_CODE` defaults to `123456` for local development.
+- OTP provider is selected server-side with `OTP_PROVIDER`. Use `OTP_PROVIDER=sendchamp` and `OTP_DEV_MODE=false` with a real `SENDCHAMP_API_KEY` on staging/production.
+- `OTP_DEV_MODE=true` keeps OTP local/mock only for development and uses `MOCK_OTP_CODE=123456`; do not enable it on production.
 - Mock provider adapters are used for DVA, funding verification, NGN transfers, USD/CNY payout quotes, and gift cards.
-- OTP sessions are stored in Redis under `otp:{otpReference}`.
+- OTP sessions are stored in Redis under `otp:{otpReference}` with the TF reference, provider reference, purpose, attempts, expiry, and verified state.
 - Registration sessions are stored in Redis under `registration:{registrationToken}`.
 - Passcode reset sessions are stored in Redis under `passcode-reset:{resetToken}`.
 - Login attempt limits are stored in Redis under `login-attempts:{phoneNumber}`.
@@ -182,15 +184,29 @@ npm run start:dev
 2. In Swagger, complete auth first:
 
 ```text
-POST /api/v1/otp/send
-POST /api/v1/otp/validate
+POST /api/v1/auth/otp/send
+POST /api/v1/auth/otp/validate
 POST /api/v1/auth/register/start
-POST /api/v1/auth/register/kyc/bvn/verify
-POST /api/v1/auth/register/kyc/selfie-validate
+POST /api/v1/kyc/bvn/verify
+POST /api/v1/kyc/bvn/selfie-validate
 POST /api/v1/auth/register/complete
 ```
 
-Use `MOCK_OTP_CODE=123456`. The mock KYC provider accepts any 11-digit BVN. Registration completion now requires the pre-registration BVN and selfie endpoints to pass for the same `registrationToken`.
+Use `OTP_DEV_MODE=true` and `MOCK_OTP_CODE=123456` locally. With Sendchamp enabled, Swagger still calls `/auth/otp/send` and `/auth/otp/validate`; TF backend calls Sendchamp internally. The mock KYC provider accepts any 11-digit BVN. Registration completion now requires `/kyc/bvn/verify` and `/kyc/bvn/selfie-validate` to pass with the same `registrationToken`.
+
+For Sendchamp OTP on staging/production, set:
+
+```env
+OTP_PROVIDER=sendchamp
+OTP_DEV_MODE=false
+SENDCHAMP_BASE_URL=https://api.sendchamp.com/api/v1
+SENDCHAMP_API_KEY=<from Sendchamp dashboard>
+SENDCHAMP_OTP_CHANNEL=sms
+SENDCHAMP_OTP_SENDER=Transfa
+SENDCHAMP_OTP_TOKEN_TYPE=numeric
+SENDCHAMP_OTP_TOKEN_LENGTH=6
+SENDCHAMP_OTP_EXPIRATION_MINUTES=10
+```
 
 For Prembly KYC, set:
 

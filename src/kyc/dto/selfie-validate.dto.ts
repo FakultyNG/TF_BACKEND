@@ -1,7 +1,16 @@
-import { ApiProperty } from "@nestjs/swagger";
-import { IsNotEmpty, IsString } from "class-validator";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { IsNotEmpty, IsOptional, IsString } from "class-validator";
 
 export class SelfieValidateDto {
+  @ApiPropertyOptional({
+    example: "reg_temp_abc123def456",
+    description: "Required for pre-registration KYC. Omit only for legacy authenticated KYC."
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  registrationToken?: string;
+
   @ApiProperty({ example: "kyc_ref_12345" })
   @IsString()
   @IsNotEmpty()

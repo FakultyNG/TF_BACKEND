@@ -9,6 +9,7 @@ The Flutter app must only call TF backend APIs.
 The Flutter app must NOT call:
 - Lync directly
 - Prembly or any KYC provider directly
+- Sendchamp or any OTP provider directly
 - Flutterwave directly
 - Bill payment providers directly
 - Gift card providers directly
@@ -23,6 +24,16 @@ Lync is the backend provider integration for DVA, wallet funding verification, N
 When `LYNC_ENABLED=false`, the backend must use `MockLyncProvider` with the same Transfa request/response formats and `provider=mock_lync` in backend metadata.
 
 The Flutter app must not receive Lync credentials, raw Lync payloads, or Lync endpoint paths. Mobile routes remain business routes such as `/wallet/dva/create`, `/funding/verify`, `/transfers/ngn/quote`, `/transfers/ngn/confirm`, `/transfers/usd/quote`, and `/transfers/cny/confirm`.
+
+Sendchamp is the backend OTP provider when `OTP_PROVIDER=sendchamp` and `OTP_DEV_MODE=false`. Flutter continues to call only TF backend routes:
+
+```text
+POST /api/v1/auth/otp/send
+POST /api/v1/auth/otp/resend
+POST /api/v1/auth/otp/validate
+```
+
+The backend calls Sendchamp `/verification/create` and `/verification/confirm`, stores only the TF OTP reference and provider reference in Redis, and never exposes `SENDCHAMP_API_KEY` or raw Sendchamp payloads to Flutter. In local development only, `OTP_DEV_MODE=true` may use the fixed mock OTP `123456`.
 
 Provider callbacks use:
 
@@ -100,6 +111,15 @@ Phone number + Passcode
 
 OTP is used for phone verification and sensitive actions.
 
+Provider behavior:
+- Supported OTP purposes are `registration`, `login_verification`, `passcode_reset`, `sensitive_action`, and legacy `phone_verification`.
+- Send/resend is rate limited per phone number and purpose.
+- Validation allows a maximum of 3 attempts per OTP reference unless configured otherwise.
+- Redis tracks `otpReference`, `phoneNumber`, `provider`, `providerReference`, `purpose`, `attempts`, `expiresAt`, and `verified`.
+- Sendchamp SMS is used for live OTP delivery. The backend confirms OTPs with Sendchamp during validation.
+- Local development may use `OTP_DEV_MODE=true` and `MOCK_OTP_CODE=123456`.
+- Common OTP error codes: `INVALID_PHONE_NUMBER`, `OTP_SEND_FAILED`, `OTP_INVALID`, `OTP_EXPIRED`, `OTP_TOO_MANY_ATTEMPTS`, `OTP_VERIFICATION_FAILED`, `OTP_PROVIDER_UNAVAILABLE`.
+
 
 ## Send OTP
 
@@ -118,7 +138,7 @@ POST /auth/otp/send
   "success": true,
   "message": "OTP sent successfully",
   "data": {
-    "phoneNumber": "08103100000",
+    "phoneNumber": "2348103100000",
     "otpReference": "otp_ref_12345"
   }
 }
@@ -240,67 +260,6 @@ If BVN or selfie verification has not passed, the backend returns:
 }
 ```
 
-## Pre-registration BVN Verification
-
-POST /auth/register/kyc/bvn/verify
-
-This endpoint verifies BVN during onboarding before a JWT exists. It is scoped by `registrationToken`; it is not a public unscoped KYC endpoint.
-
-### Request
-```JSON
-{
-  "registrationToken": "reg_temp_12345",
-  "bvn": "12345678901"
-}
-```
-
-### Success Response
-```JSON
-{
-  "success": true,
-  "message": "BVN verified successfully",
-  "data": {
-    "kycReference": "kyc_ref_12345",
-    "bvnVerified": true,
-    "firstName": "John",
-    "lastName": "Musa",
-    "email": "test@test.com",
-    "dateOfBirth": "1990-01-01",
-    "country": "NG"
-  }
-}
-```
-
-## Pre-registration Selfie Validation
-
-POST /auth/register/kyc/selfie-validate
-
-This endpoint validates the selfie during onboarding before a JWT exists. The backend uploads the selfie to secure Cloudinary storage, keeps only the secure URL in the temporary registration session, and attaches that image to the user profile when registration completes.
-
-### Request
-```JSON
-{
-  "registrationToken": "reg_temp_12345",
-  "kycReference": "kyc_ref_12345",
-  "selfieImageBase64": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAgAAAQABAAD..."
-}
-```
-
-### Success Response
-```JSON
-{
-  "success": true,
-  "message": "Selfie validation successful",
-  "data": {
-    "kycStatus": "verified",
-    "faceMatch": true,
-    "confidenceScore": 98.5,
-    "profileImageUrl": "https://res.cloudinary.com/transfa/image/upload/tf/users/kyc-selfies/kyc_ref_12345.jpg"
-  }
-}
-```
-
-
 # BVN / KYC
 
 BVN verification is required before DVA creation, wallet activation, wallet funding, and transfers.
@@ -319,14 +278,18 @@ Prembly server-side implementation:
 - `KYC_FACE_MATCH_THRESHOLD` defaults to `95`.
 - PostgreSQL stores BVN/NIN hashes or masked values only. Plain BVN is kept only in Redis for the short temporary KYC/session TTL needed between BVN verification and selfie validation.
 
-
-1. Verify BVN
+1. Verify BVN During Registration
 
 POST /kyc/bvn/verify
+
+This endpoint verifies BVN during onboarding before a JWT exists. It is scoped by `registrationToken`.
+
+Legacy authenticated KYC is still supported by omitting `registrationToken` and sending a valid `Authorization: Bearer access_token` header, but new mobile registration should use `registrationToken`.
 
 ## Request
 ```JSON
 {
+  "registrationToken": "reg_temp_12345",
   "bvn": "12345678901"
 }
 ```
@@ -347,7 +310,7 @@ POST /kyc/bvn/verify
 }
 ```
 
-2. Validate BVN with Selfie
+2. Validate BVN with Selfie During Registration
 
 POST /kyc/bvn/selfie-validate
 
@@ -363,6 +326,7 @@ The frontend must not call Prembly or any provider directly.
 
 ```json
 {
+  "registrationToken": "reg_temp_12345",
   "kycReference": "kyc_ref_12345",
   "selfieImageBase64": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAgAAAQABAAD..."
 }

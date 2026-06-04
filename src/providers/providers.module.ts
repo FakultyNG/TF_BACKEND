@@ -7,6 +7,7 @@ import { LyncModule } from "./lync/lync.module";
 import { LyncService, MockLyncProvider } from "./lync/lync.service";
 import { PremblyModule } from "./prembly/prembly.module";
 import { PremblyKycProvider } from "./prembly/prembly.service";
+import { SendchampOtpProvider } from "./sendchamp/sendchamp-otp.provider";
 import {
   DVA_PROVIDER,
   FX_PAYOUT_PROVIDER,
@@ -22,10 +23,22 @@ const lyncProviderFactory = (config: ConfigService, lync: LyncService, mock: Moc
 const kycProviderFactory = (config: ConfigService, prembly: PremblyKycProvider, mock: MockKycProvider) =>
   config.get<string>("KYC_PROVIDER", "mock").toLowerCase() === "prembly" ? prembly : mock;
 
+const otpProviderFactory = (config: ConfigService, sendchamp: SendchampOtpProvider, mock: MockOtpProvider) => {
+  const devMode = ["1", "true", "yes", "on"].includes(String(config.get<string>("OTP_DEV_MODE", "false")).toLowerCase());
+  if (devMode) return mock;
+  return config.get<string>("OTP_PROVIDER", "mock").toLowerCase() === "sendchamp" ? sendchamp : mock;
+};
+
 @Module({
   imports: [LyncModule, PremblyModule],
   providers: [
-    { provide: OTP_PROVIDER, useClass: MockOtpProvider },
+    MockOtpProvider,
+    SendchampOtpProvider,
+    {
+      provide: OTP_PROVIDER,
+      useFactory: otpProviderFactory,
+      inject: [ConfigService, SendchampOtpProvider, MockOtpProvider]
+    },
     MockKycProvider,
     {
       provide: KYC_PROVIDER,
