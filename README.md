@@ -535,6 +535,9 @@ The seed creates an admin user using:
 ```text
 ADMIN_PHONE_NUMBER=2348000000000
 ADMIN_PASSCODE=12345
+ADMIN_BOOTSTRAP_ENABLED=false
 ```
 
-Change these values in `.env` before running `npm run prisma:seed` in shared environments.
+Change these values in `.env` before running `npm run prisma:seed` in shared environments. The seed normalizes `ADMIN_PHONE_NUMBER`, so `070...` and `23470...` resolve to the same stored format used by admin login.
+
+For Render/manual deployments where running a seed is inconvenient, set `ADMIN_BOOTSTRAP_ENABLED=true` with the real `ADMIN_PHONE_NUMBER` and 5-digit `ADMIN_PASSCODE`. On startup, the backend creates or repairs that user as `SUPER_ADMIN` and syncs the passcode hash from env. Keep this disabled unless you intentionally want the admin account controlled by environment variables.

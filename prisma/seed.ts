@@ -1,10 +1,11 @@
 import { GiftCardProductStatus, PrismaClient, UserRole } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
+import { normalizePhoneNumber } from "../src/common/utils/phone.util";
 
 const prisma = new PrismaClient();
 
 async function main() {
-  const phoneNumber = process.env.ADMIN_PHONE_NUMBER || "2348000000000";
+  const phoneNumber = normalizePhoneNumber(process.env.ADMIN_PHONE_NUMBER || "2348000000000");
   const passcode = process.env.ADMIN_PASSCODE || "12345";
   const passcodeHash = await bcrypt.hash(passcode, 12);
 

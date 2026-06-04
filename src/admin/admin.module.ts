@@ -12,6 +12,7 @@ import { BiometricsModule } from "../biometrics/biometrics.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { AdminController } from "./admin.controller";
 import { AdminNotificationsController } from "./admin-notifications.controller";
+import { AdminBootstrapService } from "./admin-bootstrap.service";
 import { AdminService } from "./admin.service";
 import { AdminSupportController } from "./admin-support.controller";
 import { AdminUsersExtraController } from "./admin-users-extra.controller";
@@ -19,6 +20,6 @@ import { AdminUsersExtraController } from "./admin-users-extra.controller";
 @Module({
   imports: [AuthModule, UsersModule, KycModule, WalletModule, TransfersModule, GiftCardsModule, PricingModule, SupportModule, ProfileModule, BiometricsModule, NotificationsModule],
   controllers: [AdminController, AdminSupportController, AdminUsersExtraController, AdminNotificationsController],
-  providers: [AdminService]
+  providers: [AdminService, AdminBootstrapService]
 })
 export class AdminModule {}
