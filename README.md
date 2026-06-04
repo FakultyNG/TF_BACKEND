@@ -357,9 +357,10 @@ POST /api/v1/webhooks/dojah
 POST /api/v1/webhooks/prembly
 POST /api/v1/webhooks/payout-provider
 POST /api/v1/webhooks/reeplay
+POST /api/v1/webhooks/sendchamp
 ```
 
-Each provider webhook must include an HMAC-SHA256 signature of the exact JSON request body in one of the supported signature headers, such as `x-signature`, `x-lync-signature`, `x-dojah-signature`, `x-payout-signature`, or `x-reeplay-signature`.
+Each provider webhook must include an HMAC-SHA256 signature of the exact JSON request body in one of the supported signature headers, such as `x-signature`, `x-lync-signature`, `x-dojah-signature`, `x-payout-signature`, `x-reeplay-signature`, or `x-sendchamp-signature`.
 
 Local signed Lync example:
 
@@ -377,6 +378,8 @@ curl -X POST http://localhost:4000/api/v1/webhooks/lync \
 ```
 
 Webhook processing stores `WebhookLog` and `WebhookEvent` rows, uses `IdempotencyKey` records to reject duplicates, masks sensitive payload fields, and creates wallet ledger entries/reversal transactions for any wallet-impacting event. Admins can review logs and retry failed processing through `/api/v1/admin/webhooks/*`.
+
+Sendchamp webhooks are delivery-status logs only. They do not verify OTPs, mark OTP sessions verified, or change auth state. OTP validation remains controlled by `/api/v1/auth/otp/validate`, which calls Sendchamp `/verification/confirm` from the backend.
 
 Webhook services create TF notification rows for important status changes and then attempt Firebase push delivery through `NotificationsService`. Provider webhook controllers do not call Firebase directly.
 

@@ -27,7 +27,8 @@ export class WebhookSignatureService {
       "x-dojah-signature",
       "x-prembly-signature",
       "x-payout-signature",
-      "x-reeplay-signature"
+      "x-reeplay-signature",
+      "x-sendchamp-signature"
     ];
     for (const key of keys) {
       const value = headers[key];

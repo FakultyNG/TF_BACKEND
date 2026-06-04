@@ -21,6 +21,8 @@ import { PremblyWebhookController } from "./prembly/prembly-webhook.controller";
 import { PremblyWebhookService } from "./prembly/prembly-webhook.service";
 import { PayoutProviderWebhookController } from "./payout-provider/payout-provider-webhook.controller";
 import { PayoutProviderWebhookService } from "./payout-provider/payout-provider-webhook.service";
+import { SendchampWebhookController } from "./sendchamp/sendchamp-webhook.controller";
+import { SendchampWebhookService } from "./sendchamp/sendchamp-webhook.service";
 
 @Module({
   imports: [AuthModule, WalletModule, CashDropModule, NotificationsModule],
@@ -30,6 +32,7 @@ import { PayoutProviderWebhookService } from "./payout-provider/payout-provider-
     PremblyWebhookController,
     PayoutProviderWebhookController,
     GiftCardProviderWebhookController,
+    SendchampWebhookController,
     AdminWebhooksController
   ],
   providers: [
@@ -44,6 +47,7 @@ import { PayoutProviderWebhookService } from "./payout-provider/payout-provider-
     PremblyWebhookService,
     PayoutProviderWebhookService,
     GiftCardProviderWebhookService,
+    SendchampWebhookService,
     AdminWebhooksService
   ],
   exports: [WebhookLogService]

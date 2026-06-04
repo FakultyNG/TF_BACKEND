@@ -4,6 +4,7 @@ import { WebhookSignatureService } from "../src/webhooks/common/webhook-signatur
 import { LyncWebhookService } from "../src/webhooks/lync/lync-webhook.service";
 import { PayoutProviderWebhookService } from "../src/webhooks/payout-provider/payout-provider-webhook.service";
 import { GiftCardProviderWebhookService } from "../src/webhooks/gift-card-provider/gift-card-provider-webhook.service";
+import { SendchampWebhookService } from "../src/webhooks/sendchamp/sendchamp-webhook.service";
 
 describe("webhook infrastructure", () => {
   it("verifies provider HMAC signatures", () => {
@@ -116,5 +117,60 @@ describe("webhook infrastructure", () => {
 
     expect(prisma.giftCardPurchase.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "purchase_1" } }));
     expect(prisma.transaction.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "txn_1" } }));
+  });
+
+  it("logs Sendchamp delivery events without touching OTP auth state", async () => {
+    const logs = {
+      createReceived: jest.fn().mockResolvedValue({ id: "log_1" }),
+      isProcessed: jest.fn().mockResolvedValue(false),
+      recordProcessedKey: jest.fn().mockResolvedValue(true),
+      markProcessed: jest.fn(),
+      markDuplicate: jest.fn(),
+      markFailed: jest.fn()
+    };
+    const signatures = { verify: jest.fn().mockReturnValue(true), secret: jest.fn().mockReturnValue("secret") };
+    const service = new SendchampWebhookService({ auditLog: { create: jest.fn() } } as never, logs as never, signatures as never);
+
+    await expect(service.receive({ event: "sms.delivered", status: "delivered", reference: "sendchamp_ref_1", code: "123456" }, {})).resolves.toEqual({
+      duplicate: false
+    });
+
+    expect(signatures.secret).toHaveBeenCalledWith("SENDCHAMP_WEBHOOK_SECRET");
+    expect(logs.createReceived).toHaveBeenCalledWith(
+      "sendchamp",
+      expect.objectContaining({ eventType: "sms.delivered", providerReference: "sendchamp_ref_1", status: TransactionStatus.successful }),
+      expect.any(Object),
+      true
+    );
+    expect(logs.markProcessed).toHaveBeenCalledWith("log_1", "sendchamp", expect.any(Object), "OtpDelivery", "sendchamp_ref_1");
+  });
+
+  it("deduplicates Sendchamp delivery webhooks", async () => {
+    const logs = {
+      createReceived: jest.fn().mockResolvedValue({ id: "log_1" }),
+      isProcessed: jest.fn().mockResolvedValue(true),
+      markDuplicate: jest.fn()
+    };
+    const signatures = { verify: jest.fn().mockReturnValue(true), secret: jest.fn().mockReturnValue("secret") };
+    const service = new SendchampWebhookService({} as never, logs as never, signatures as never);
+
+    await expect(service.receive({ event: "sms.delivered", reference: "sendchamp_ref_1" }, {})).resolves.toEqual({
+      duplicate: true
+    });
+    expect(logs.markDuplicate).toHaveBeenCalledWith("log_1");
+  });
+
+  it("rejects invalid Sendchamp webhook signatures", async () => {
+    const logs = {
+      createReceived: jest.fn().mockResolvedValue({ id: "log_1" }),
+      markFailed: jest.fn()
+    };
+    const signatures = { verify: jest.fn().mockReturnValue(false), secret: jest.fn().mockReturnValue("secret") };
+    const service = new SendchampWebhookService({} as never, logs as never, signatures as never);
+
+    await expect(service.receive({ event: "sms.delivered", reference: "sendchamp_ref_1" }, {})).rejects.toMatchObject({
+      code: "INVALID_WEBHOOK_SIGNATURE"
+    });
+    expect(logs.markFailed).toHaveBeenCalledWith("log_1", "Invalid webhook signature");
   });
 });
