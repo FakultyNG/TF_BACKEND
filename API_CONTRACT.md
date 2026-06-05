@@ -33,7 +33,7 @@ POST /api/v1/auth/otp/resend
 POST /api/v1/auth/otp/validate
 ```
 
-The backend calls Sendchamp `/verification/create` and `/verification/confirm`, stores only the TF OTP reference and provider reference in Redis, and never exposes `SENDCHAMP_API_KEY` or raw Sendchamp payloads to Flutter. In local development only, `OTP_DEV_MODE=true` may use the fixed mock OTP `123456`.
+The backend calls Sendchamp `/verification/create` and `/verification/confirm`, sends SMS OTPs with route `non_dnd`, stores only the TF OTP reference and provider reference in Redis, and never exposes `SENDCHAMP_API_KEY` or raw Sendchamp payloads to Flutter. In local development only, `OTP_DEV_MODE=true` may use the fixed mock OTP `123456`.
 
 Provider callbacks use:
 

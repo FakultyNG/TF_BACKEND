@@ -30,6 +30,7 @@ export class SendchampOtpProvider implements OtpProvider {
         url: "/verification/create",
         data: {
           channel: this.config.get<string>("SENDCHAMP_OTP_CHANNEL", "sms"),
+          route: this.config.get<string>("SENDCHAMP_OTP_ROUTE", "non_dnd"),
           sender: this.config.get<string>("SENDCHAMP_OTP_SENDER", "Transfa"),
           token_type: this.config.get<string>("SENDCHAMP_OTP_TOKEN_TYPE", "numeric"),
           token_length: Number(this.config.get<number>("SENDCHAMP_OTP_TOKEN_LENGTH", 6)),

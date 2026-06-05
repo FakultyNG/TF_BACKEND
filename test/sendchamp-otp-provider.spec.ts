@@ -13,6 +13,7 @@ describe("SendchampOtpProvider", () => {
         SENDCHAMP_BASE_URL: "https://api.sendchamp.com/api/v1",
         SENDCHAMP_API_KEY: "sendchamp_secret",
         SENDCHAMP_OTP_CHANNEL: "sms",
+        SENDCHAMP_OTP_ROUTE: "non_dnd",
         SENDCHAMP_OTP_SENDER: "Transfa",
         SENDCHAMP_OTP_TOKEN_TYPE: "numeric",
         SENDCHAMP_OTP_TOKEN_LENGTH: 6,
@@ -50,6 +51,7 @@ describe("SendchampOtpProvider", () => {
       url: "/verification/create",
       data: {
         channel: "sms",
+        route: "non_dnd",
         sender: "Transfa",
         token_type: "numeric",
         token_length: 6,
