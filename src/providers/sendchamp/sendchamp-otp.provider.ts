@@ -75,6 +75,7 @@ export class SendchampOtpProvider implements OtpProvider {
       };
     } catch (error) {
       if (axios.isAxiosError(error) && [400, 422].includes(error.response?.status ?? 0)) {
+        this.logProviderError("Sendchamp OTP confirm rejected", error);
         return {
           provider: "sendchamp",
           verified: false,
@@ -112,7 +113,8 @@ export class SendchampOtpProvider implements OtpProvider {
   private extractStatus(payload: unknown): string | undefined {
     const data = this.asRecord(payload);
     const nested = this.asRecord(data.data);
-    const value = nested.status ?? nested.verification_status ?? data.status ?? data.message;
+    // Sendchamp confirms successfully with data.status="sent" and status="success".
+    const value = data.status ?? nested.verification_status ?? nested.status ?? data.message;
     return typeof value === "string" ? value : undefined;
   }
 

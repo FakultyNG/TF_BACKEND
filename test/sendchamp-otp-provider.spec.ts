@@ -72,7 +72,17 @@ describe("SendchampOtpProvider", () => {
   });
 
   it("confirms a Sendchamp verification using provider reference and token", async () => {
-    request.mockResolvedValueOnce({ data: { data: { status: "confirmed" } } });
+    request.mockResolvedValueOnce({
+      data: {
+        code: 200,
+        data: {
+          reference: "sendchamp_ref_123",
+          status: "sent"
+        },
+        message: "Confirm verification",
+        status: "success"
+      }
+    });
 
     const provider = new SendchampOtpProvider(config);
 
@@ -95,7 +105,7 @@ describe("SendchampOtpProvider", () => {
     expect(result).toEqual({
       provider: "sendchamp",
       verified: true,
-      status: "confirmed"
+      status: "success"
     });
   });
 
