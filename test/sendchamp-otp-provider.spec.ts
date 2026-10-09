@@ -1,5 +1,8 @@
 import axios from "axios";
+import { ConfigService } from "@nestjs/config";
 import { ApiException } from "../src/common/errors/api.exception";
+import { MockOtpProvider } from "../src/providers/adapters/mock-otp.provider";
+import { otpProviderFactory } from "../src/providers/providers.module";
 import { SendchampOtpProvider } from "../src/providers/sendchamp/sendchamp-otp.provider";
 
 jest.mock("axios");
@@ -13,7 +16,6 @@ describe("SendchampOtpProvider", () => {
         SENDCHAMP_BASE_URL: "https://api.sendchamp.com/api/v1",
         SENDCHAMP_API_KEY: "sendchamp_secret",
         SENDCHAMP_OTP_CHANNEL: "sms",
-        SENDCHAMP_OTP_ROUTE: "non_dnd",
         SENDCHAMP_OTP_SENDER: "Transfa",
         SENDCHAMP_OTP_TOKEN_TYPE: "numeric",
         SENDCHAMP_OTP_TOKEN_LENGTH: 6,
@@ -51,7 +53,6 @@ describe("SendchampOtpProvider", () => {
       url: "/verification/create",
       data: {
         channel: "sms",
-        route: "non_dnd",
         sender: "Transfa",
         token_type: "numeric",
         token_length: 6,
@@ -118,7 +119,6 @@ describe("SendchampOtpProvider", () => {
   });
 
   it("maps provider send failures to OTP_SEND_FAILED without exposing provider secrets", async () => {
-    jest.spyOn(console, "error").mockImplementation(() => undefined);
     request.mockRejectedValueOnce(new Error("provider down"));
     const provider = new SendchampOtpProvider(config);
 
@@ -129,5 +129,41 @@ describe("SendchampOtpProvider", () => {
         purpose: "registration"
       })
     ).rejects.toMatchObject({ code: "OTP_SEND_FAILED" });
+  });
+});
+
+describe("OTP provider configuration", () => {
+  const sendchamp = {} as SendchampOtpProvider;
+  const mock = {} as MockOtpProvider;
+
+  const config = (values: Record<string, string>) =>
+    ({
+      get: jest.fn((key: string, fallback?: string) => values[key] ?? fallback)
+    }) as unknown as ConfigService;
+
+  it("uses the mock provider only when OTP development mode is enabled", () => {
+    expect(otpProviderFactory(config({ OTP_DEV_MODE: "true" }), sendchamp, mock)).toBe(mock);
+  });
+
+  it("uses Sendchamp when the live provider and key are configured", () => {
+    expect(
+      otpProviderFactory(
+        config({ OTP_DEV_MODE: "false", OTP_PROVIDER: "sendchamp", SENDCHAMP_API_KEY: "live_key" }),
+        sendchamp,
+        mock
+      )
+    ).toBe(sendchamp);
+  });
+
+  it("rejects a silent mock fallback outside OTP development mode", () => {
+    expect(() => otpProviderFactory(config({ OTP_DEV_MODE: "false" }), sendchamp, mock)).toThrow(
+      "OTP_PROVIDER must be set to sendchamp"
+    );
+  });
+
+  it("rejects Sendchamp configuration without an API key", () => {
+    expect(() =>
+      otpProviderFactory(config({ OTP_DEV_MODE: "false", OTP_PROVIDER: "sendchamp" }), sendchamp, mock)
+    ).toThrow("SENDCHAMP_API_KEY is required");
   });
 });

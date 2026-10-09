@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import axios, { AxiosInstance } from "axios";
 import { ApiException } from "../../common/errors/api.exception";
@@ -6,10 +6,11 @@ import { ConfirmOtpInput, OtpConfirmResult, OtpProvider, OtpSendResult, SendOtpI
 
 @Injectable()
 export class SendchampOtpProvider implements OtpProvider {
+  private readonly logger = new Logger(SendchampOtpProvider.name);
   private readonly client: AxiosInstance;
 
   constructor(private readonly config: ConfigService) {
-    const apiKey = this.config.get<string>("SENDCHAMP_API_KEY", "");
+    const apiKey = this.config.get<string>("SENDCHAMP_API_KEY", "").trim();
     this.client = axios.create({
       baseURL: this.config.get<string>("SENDCHAMP_BASE_URL", "https://api.sendchamp.com/api/v1"),
       timeout: Number(this.config.get<number>("SENDCHAMP_TIMEOUT_MS", 15000)),
@@ -30,7 +31,6 @@ export class SendchampOtpProvider implements OtpProvider {
         url: "/verification/create",
         data: {
           channel: this.config.get<string>("SENDCHAMP_OTP_CHANNEL", "sms"),
-          route: this.config.get<string>("SENDCHAMP_OTP_ROUTE", "non_dnd"),
           sender: this.config.get<string>("SENDCHAMP_OTP_SENDER", "Transfa"),
           token_type: this.config.get<string>("SENDCHAMP_OTP_TOKEN_TYPE", "numeric"),
           token_length: Number(this.config.get<number>("SENDCHAMP_OTP_TOKEN_LENGTH", 6)),
@@ -83,7 +83,7 @@ export class SendchampOtpProvider implements OtpProvider {
   }
 
   private ensureConfigured() {
-    if (!this.config.get<string>("SENDCHAMP_API_KEY")) {
+    if (!this.config.get<string>("SENDCHAMP_API_KEY", "").trim()) {
       throw new ApiException("OTP provider is unavailable", "OTP_PROVIDER_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE);
     }
   }
@@ -126,7 +126,29 @@ export class SendchampOtpProvider implements OtpProvider {
   }
 
   private logProviderError(message: string, error: unknown) {
-    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
-    console.error(JSON.stringify({ message, status }));
+    if (!axios.isAxiosError(error)) {
+      this.logger.error(JSON.stringify({ message, errorType: error instanceof Error ? error.name : typeof error }));
+      return;
+    }
+
+    const payload = this.asRecord(error.response?.data);
+    const nestedError = this.asRecord(payload.error);
+    const providerMessage = this.safeLogValue(payload.message ?? nestedError.message);
+    const providerCode = this.safeLogValue(payload.code ?? nestedError.code);
+
+    this.logger.error(
+      JSON.stringify({
+        message,
+        status: error.response?.status,
+        axiosCode: error.code,
+        providerCode,
+        providerMessage
+      })
+    );
+  }
+
+  private safeLogValue(value: unknown): string | undefined {
+    if (typeof value !== "string" && typeof value !== "number") return undefined;
+    return String(value).slice(0, 300);
   }
 }

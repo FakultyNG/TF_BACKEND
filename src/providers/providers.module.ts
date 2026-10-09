@@ -23,10 +23,19 @@ const lyncProviderFactory = (config: ConfigService, lync: LyncService, mock: Moc
 const kycProviderFactory = (config: ConfigService, prembly: PremblyKycProvider, mock: MockKycProvider) =>
   config.get<string>("KYC_PROVIDER", "mock").toLowerCase() === "prembly" ? prembly : mock;
 
-const otpProviderFactory = (config: ConfigService, sendchamp: SendchampOtpProvider, mock: MockOtpProvider) => {
+export const otpProviderFactory = (config: ConfigService, sendchamp: SendchampOtpProvider, mock: MockOtpProvider) => {
   const devMode = ["1", "true", "yes", "on"].includes(String(config.get<string>("OTP_DEV_MODE", "false")).toLowerCase());
   if (devMode) return mock;
-  return config.get<string>("OTP_PROVIDER", "mock").toLowerCase() === "sendchamp" ? sendchamp : mock;
+
+  const provider = config.get<string>("OTP_PROVIDER", "").trim().toLowerCase();
+  if (provider !== "sendchamp") {
+    throw new Error("OTP_PROVIDER must be set to sendchamp when OTP_DEV_MODE is false");
+  }
+  if (!config.get<string>("SENDCHAMP_API_KEY", "").trim()) {
+    throw new Error("SENDCHAMP_API_KEY is required when OTP_PROVIDER is sendchamp");
+  }
+
+  return sendchamp;
 };
 
 @Module({
