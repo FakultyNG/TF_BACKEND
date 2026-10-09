@@ -57,7 +57,11 @@ describe("SendchampOtpProvider", () => {
         token_type: "numeric",
         token_length: 6,
         expiration_time: 10,
-        customer_mobile_number: "2348103100000"
+        customer_mobile_number: "2348103100000",
+        meta_data: {
+          otp_reference: "otp_ref_123",
+          purpose: "registration"
+        }
       }
     });
     expect(result).toEqual({

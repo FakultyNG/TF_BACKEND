@@ -35,7 +35,11 @@ export class SendchampOtpProvider implements OtpProvider {
           token_type: this.config.get<string>("SENDCHAMP_OTP_TOKEN_TYPE", "numeric"),
           token_length: Number(this.config.get<number>("SENDCHAMP_OTP_TOKEN_LENGTH", 6)),
           expiration_time: Number(this.config.get<number>("SENDCHAMP_OTP_EXPIRATION_MINUTES", 10)),
-          customer_mobile_number: input.phoneNumber
+          customer_mobile_number: input.phoneNumber,
+          meta_data: {
+            otp_reference: input.otpReference,
+            purpose: input.purpose
+          }
         }
       });
 
