@@ -3,6 +3,7 @@ import { AuthModule } from "../auth/auth.module";
 import { WalletModule } from "../wallet/wallet.module";
 import { CashDropModule } from "../cash-drop/cash-drop.module";
 import { NotificationsModule } from "../notifications/notifications.module";
+import { GiftCardsModule } from "../gift-cards/gift-cards.module";
 import { AdminWebhooksController } from "./admin-webhooks.controller";
 import { AdminWebhooksService } from "./admin-webhooks.service";
 import { WebhookLogService } from "./common/webhook-log.service";
@@ -25,7 +26,13 @@ import { SendchampWebhookController } from "./sendchamp/sendchamp-webhook.contro
 import { SendchampWebhookService } from "./sendchamp/sendchamp-webhook.service";
 
 @Module({
-  imports: [AuthModule, WalletModule, CashDropModule, NotificationsModule],
+  imports: [
+    AuthModule,
+    WalletModule,
+    CashDropModule,
+    NotificationsModule,
+    GiftCardsModule
+  ],
   controllers: [
     LyncWebhookController,
     DojahWebhookController,

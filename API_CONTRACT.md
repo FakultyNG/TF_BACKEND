@@ -923,13 +923,13 @@ The backend uses the quoteId to retrieve the stored transfer details.
 CNY transfer is a payout flow, User pays from NGN wallet.
 
 Backend handles FX, provider routing, payout, and reconciliation.
-This endpoint receives the full chineese CNY transfer details before quote generation.
+This endpoint receives the full Chinese CNY transfer details before quote generation.
 
 The backend validates the beneficiary details, calculates fees, checks payout route availability, and returns a locked quote.
 
 1. CNY Transfer Quote
 
-POST /transfers/usd/quote
+POST /transfers/cny/quote
 
 ## Request
 ```json
@@ -1078,18 +1078,66 @@ POST /gift-cards/create
   "success": true,
   "message": "Gift card purchase submitted successfully",
   "data": {
+    "purchaseId": "gift_purchase_001",
     "transactionId": "txn_gift_001",
     "status": "processing",
     "giftCardName": "Reeplay Gift Card",
     "amount": 50,
-    "currency": "USD"
+    "currency": "USD",
+    "totalNgnDebit": 85000,
+    "fee": 1000,
+    "createdAt": "2026-05-25T10:35:00Z"
   }
 }
 ```
 
-4. Get Gift Card Details
+`purchaseId` identifies the gift-card order. `transactionId` identifies the
+related NGN wallet ledger transaction. Clients must not treat these identifiers
+as interchangeable.
 
-GET /gift-cards/:id
+4. List My Gift Card Purchases
+
+GET /gift-cards/purchases?page=1&limit=20&status=delivered
+
+`status` is optional. Supported values are `processing`, `delivered`, `failed`,
+`reversed`, and `expired`.
+
+## Success Response
+```json
+{
+  "success": true,
+  "message": "Gift card purchases fetched successfully",
+  "data": {
+    "items": [
+      {
+        "purchaseId": "gift_purchase_001",
+        "transactionId": "txn_gift_001",
+        "giftCardName": "Reeplay Gift Card",
+        "productImageUrl": "https://cdn.example.com/gift-cards/reeplay.png",
+        "amount": 50,
+        "currency": "USD",
+        "totalNgnDebit": 85000,
+        "fee": 1000,
+        "status": "delivered",
+        "redemptionCodeMasked": "****-****-4821",
+        "createdAt": "2026-05-25T10:35:00Z",
+        "deliveredAt": "2026-05-25T10:36:00Z",
+        "expiresAt": "2027-05-25T23:59:59Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 20,
+      "total": 1,
+      "totalPages": 1
+    }
+  }
+}
+```
+
+5. Get Gift Card Purchase Details
+
+GET /gift-cards/purchases/:purchaseId
 
 ## Success Response
 ```json
@@ -1097,14 +1145,27 @@ GET /gift-cards/:id
   "success": true,
   "message": "Gift card details fetched successfully",
   "data": {
-    "id": "gift_purchase_001",
+    "purchaseId": "gift_purchase_001",
+    "transactionId": "txn_gift_001",
     "giftCardName": "Amazon Gift Card",
     "amount": 50,
     "currency": "USD",
     "status": "delivered",
+    "totalNgnDebit": 85000,
+    "fee": 1000,
+    "redemptionCode": "AMZN-ABCD-EFGH-4821",
+    "redemptionCodeMasked": "****-****-4821",
+    "redemptionInstructions": "Redeem with the issuing merchant.",
+    "createdAt": "2026-05-25T10:35:00Z",
+    "deliveredAt": "2026-05-25T10:36:00Z",
+    "expiresAt": "2027-05-25T23:59:59Z"
   }
 }
 ```
+
+The backend must encrypt redemption codes at rest. Purchase-list responses must
+return only `redemptionCodeMasked`; the full `redemptionCode` is returned only
+from the authenticated purchase-detail endpoint.
 
 
 # SUPPORT TICKETS
@@ -1340,11 +1401,14 @@ PATCH /profile
     "firstName": "newfirstname",
     "lastName": "newlastname",
     "email": "newemail@test.com",
-    "phoneNumber": "2348103100000",
     "dateOfBirth": "yyyy-mm-dd",
-    "kycStatus": "verified"   
+    "gender": "Male"
 }
 ```
+
+`phoneNumber`, `kycStatus`, `walletStatus`, and `profileImageUrl` are
+server-controlled fields and cannot be changed through this endpoint. Phone
+number changes require a separate OTP-verified flow.
 ## Success Response
 ```json
 {
@@ -2020,14 +2084,14 @@ The frontend should not manually create recent beneficiaries unless explicitly a
 
 1. Search Recent Beneficiaries
 
-`GET /beneficiaries/recent/search?query=0123&type=ngn_transfer`
+`GET /transfers/recent-beneficiaries/search?q=0123&type=ngn_transfer&page=1&limit=20`
 
 This endpoint is called while the user types an account number or recipient identifier.
 
 ### Query Params
 
 ```text
-query=0123
+q=0123
 type=ngn_transfer
 ```
 
@@ -2044,10 +2108,11 @@ cny_transfer
 ```json
 {
   "success": true,
-  "message": "Recent beneficiaries fetched successfully",
-  "data": [
-    {
-      "beneficiaryId": "ben_12345",
+  "message": "Recent beneficiaries search successful",
+  "data": {
+    "items": [
+      {
+      "id": "ben_12345",
       "type": "ngn_transfer",
       "displayName": "JOHN DOE",
       "bankName": "Access Bank",
@@ -2055,8 +2120,10 @@ cny_transfer
       "accountNumber": "0123456789",
       "accountName": "JOHN DOE",
       "lastUsedAt": "2026-05-25T10:30:00Z"
-    }
-  ]
+      }
+    ],
+    "pagination": { "page": 1, "limit": 20, "total": 1 }
+  }
 }
 ```
 
@@ -2064,7 +2131,7 @@ cny_transfer
 
 2. Get Recent Beneficiaries
 
-`GET /beneficiaries/recent?type=ngn_transfer`
+`GET /transfers/recent-beneficiaries?type=ngn_transfer&page=1&limit=20`
 
 ### Success Response
 
@@ -2072,9 +2139,10 @@ cny_transfer
 {
   "success": true,
   "message": "Recent beneficiaries fetched successfully",
-  "data": [
-    {
-      "beneficiaryId": "ben_12345",
+  "data": {
+    "items": [
+      {
+      "id": "ben_12345",
       "type": "ngn_transfer",
       "displayName": "JOHN DOE",
       "bankName": "Access Bank",
@@ -2082,8 +2150,10 @@ cny_transfer
       "accountNumber": "0123456789",
       "accountName": "JOHN DOE",
       "lastUsedAt": "2026-05-25T10:30:00Z"
-    }
-  ]
+      }
+    ],
+    "pagination": { "page": 1, "limit": 20, "total": 1 }
+  }
 }
 ```
 
@@ -2091,7 +2161,7 @@ cny_transfer
 
 3. Delete Recent Beneficiary
 
-`DELETE /beneficiaries/recent/:beneficiaryId`
+`DELETE /transfers/recent-beneficiaries/:beneficiaryId`
 
 ### Success Response
 
@@ -2114,7 +2184,7 @@ When user types into account number field:
 ```text
 1. User types at least 3 digits.
 2. Flutter calls:
-   GET /beneficiaries/recent/search?query=012&type=ngn_transfer
+   GET /transfers/recent-beneficiaries/search?q=012&type=ngn_transfer
 3. App shows matching recent beneficiaries.
 4. User taps one beneficiary.
 5. App auto-populates:

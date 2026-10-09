@@ -4,6 +4,7 @@ import { IncomingHttpHeaders } from "http";
 import { ApiException } from "../../common/errors/api.exception";
 import { PrismaService } from "../../prisma/prisma.service";
 import { WalletService } from "../../wallet/wallet.service";
+import { GiftCardCodeCipher } from "../../gift-cards/gift-card-code-cipher.service";
 import { eventKey, normalizeWebhookEvent, NormalizedWebhookEvent } from "../common/webhook-event-normalizer";
 import { WebhookLogService } from "../common/webhook-log.service";
 import { WebhookSignatureService } from "../common/webhook-signature.service";
@@ -16,7 +17,8 @@ export class GiftCardProviderWebhookService {
     private readonly prisma: PrismaService,
     private readonly walletService: WalletService,
     private readonly logs: WebhookLogService,
-    private readonly signatures: WebhookSignatureService
+    private readonly signatures: WebhookSignatureService,
+    private readonly codeCipher: GiftCardCodeCipher
   ) {}
 
   async receive(payload: unknown, headers: IncomingHttpHeaders) {
@@ -53,7 +55,16 @@ export class GiftCardProviderWebhookService {
         await this.prisma.$transaction([
           this.prisma.giftCardPurchase.update({
             where: { id: purchase.id },
-            data: { status: GiftCardPurchaseStatus.delivered, metadata: this.logs.toJson(this.logs.sanitize(payload)) }
+            data: {
+              status: GiftCardPurchaseStatus.delivered,
+              deliveredAt: new Date(),
+              redemptionCode: event.redemptionCode
+                ? this.codeCipher.encrypt(event.redemptionCode)
+                : undefined,
+              redemptionInstructions: event.redemptionInstructions,
+              expiresAt: event.expiresAt ? new Date(event.expiresAt) : undefined,
+              metadata: this.logs.toJson(this.logs.sanitize(payload))
+            }
           }),
           this.prisma.transaction.update({
             where: { id: purchase.transactionId },

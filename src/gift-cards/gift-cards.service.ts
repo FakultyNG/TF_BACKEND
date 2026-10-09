@@ -3,14 +3,21 @@ import { GiftCardProductStatus, GiftCardPurchaseStatus, Prisma, TransactionStatu
 import { v4 as uuid } from "uuid";
 import { AuthService } from "../auth/auth.service";
 import { ApiException } from "../common/errors/api.exception";
+import { offset, pagination } from "../common/dto/pagination-query.dto";
 import { PricingService } from "../pricing/pricing.service";
 import { GIFT_CARD_PROVIDER } from "../providers/provider.tokens";
 import { GiftCardProviderService } from "../providers/gift-cards/gift-card-provider.interface";
 import { RedisService } from "../redis/redis.service";
 import { WalletService } from "../wallet/wallet.service";
 import { GiftCardQuoteDto } from "./dto/gift-card-quote.dto";
+import { GiftCardPurchaseQueryDto } from "./dto/gift-card-purchase-query.dto";
 import { GiftCardQuote } from "./gift-card-quote.types";
 import { PrismaService } from "../prisma/prisma.service";
+import { GiftCardCodeCipher } from "./gift-card-code-cipher.service";
+
+type GiftCardPurchaseView = Prisma.GiftCardPurchaseGetPayload<{
+  include: { transaction: true; product: true };
+}>;
 
 @Injectable()
 export class GiftCardsService {
@@ -22,6 +29,7 @@ export class GiftCardsService {
     private readonly walletService: WalletService,
     private readonly authService: AuthService,
     private readonly pricingService: PricingService,
+    private readonly codeCipher: GiftCardCodeCipher,
     @Inject(GIFT_CARD_PROVIDER) private readonly giftCardProvider: GiftCardProviderService
   ) {}
 
@@ -35,7 +43,8 @@ export class GiftCardsService {
       name: item.name,
       currency: item.currency,
       minAmount: item.minAmount,
-      maxAmount: item.maxAmount
+      maxAmount: item.maxAmount,
+      imageUrl: "imageUrl" in item ? item.imageUrl : undefined
     }));
     await this.redis.setJson("gift-cards:products", data, 3600);
     return data;
@@ -104,7 +113,7 @@ export class GiftCardsService {
         amount: quote.amount,
         currency: quote.currency
       });
-      await this.prisma.giftCardPurchase.create({
+      const purchase = await this.prisma.giftCardPurchase.create({
         data: {
           userId,
           transactionId: debit.transaction.id,
@@ -114,7 +123,10 @@ export class GiftCardsService {
           currency: quote.currency,
           status: providerResult.status as GiftCardPurchaseStatus,
           providerReference: providerResult.providerReference,
-          redemptionCode: providerResult.redemptionCode,
+          redemptionCode: this.codeCipher.encrypt(providerResult.redemptionCode),
+          redemptionInstructions: providerResult.redemptionInstructions,
+          deliveredAt: providerResult.status === "delivered" ? new Date() : undefined,
+          expiresAt: providerResult.expiresAt ? new Date(providerResult.expiresAt) : undefined,
           metadata: providerResult.raw as Prisma.InputJsonValue
         }
       });
@@ -122,11 +134,15 @@ export class GiftCardsService {
       await this.walletService.logProvider("mock_gift_card", "gift_card_order", reference, providerResult.providerReference, providerResult.status, quote, providerResult.raw);
       await this.redis.del(`quote:${quoteId}`);
       return {
+        purchaseId: purchase.id,
         transactionId: debit.transaction.id,
         status: providerResult.status,
         giftCardName: quote.giftCardName,
         amount: quote.amount,
-        currency: quote.currency
+        currency: quote.currency,
+        totalNgnDebit: quote.totalNgnDebit,
+        fee: quote.fee,
+        createdAt: purchase.createdAt
       };
     } catch (error) {
       await this.walletService.reverseTransaction(undefined, debit.transaction.id, "Provider failed before gift card order submission");
@@ -134,22 +150,39 @@ export class GiftCardsService {
     }
   }
 
+  async listUserPurchases(userId: string, query: GiftCardPurchaseQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const where = { userId, status: query.status };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.giftCardPurchase.findMany({
+        where,
+        take: limit,
+        skip: offset(page, limit),
+        orderBy: { createdAt: "desc" },
+        include: { transaction: true, product: true }
+      }),
+      this.prisma.giftCardPurchase.count({ where })
+    ]);
+    return {
+      items: items.map((purchase) => this.toPurchaseResponse(purchase, false)),
+      pagination: {
+        ...pagination(page, limit, total),
+        totalPages: Math.ceil(total / limit)
+      }
+    };
+  }
+
   async getDetails(userId: string, id: string) {
     const purchase = await this.prisma.giftCardPurchase.findFirst({
       where: {
         userId,
         OR: [{ id }, { transactionId: id }]
-      }
+      },
+      include: { transaction: true, product: true }
     });
     if (!purchase) throw new ApiException("Gift card purchase not found", "GIFT_CARD_PURCHASE_NOT_FOUND", HttpStatus.NOT_FOUND);
-    return {
-      id: purchase.id,
-      giftCardName: purchase.giftCardName,
-      amount: purchase.amount,
-      currency: purchase.currency,
-      status: purchase.status,
-      recipientEmail: purchase.recipientEmail
-    };
+    return this.toPurchaseResponse(purchase, true);
   }
 
   listPurchases(take = 50, skip = 0) {
@@ -182,5 +215,29 @@ export class GiftCardsService {
       throw new ApiException("Gift card quote expired", "QUOTE_EXPIRED", HttpStatus.BAD_REQUEST);
     }
     return quote;
+  }
+
+  private toPurchaseResponse(purchase: GiftCardPurchaseView, includeCode: boolean) {
+    const redemptionCode = this.codeCipher.decrypt(purchase.redemptionCode);
+    return {
+      purchaseId: purchase.id,
+      transactionId: purchase.transactionId,
+      giftCardName: purchase.giftCardName,
+      productImageUrl: purchase.product.imageUrl,
+      amount: purchase.amount,
+      currency: purchase.currency,
+      totalNgnDebit: purchase.transaction.totalDebit,
+      fee: purchase.transaction.fee,
+      status: purchase.status,
+      redemptionCode:
+        includeCode && purchase.status === GiftCardPurchaseStatus.delivered
+          ? redemptionCode
+          : undefined,
+      redemptionCodeMasked: this.codeCipher.mask(redemptionCode),
+      redemptionInstructions: purchase.redemptionInstructions,
+      createdAt: purchase.createdAt,
+      deliveredAt: purchase.deliveredAt,
+      expiresAt: purchase.expiresAt
+    };
   }
 }

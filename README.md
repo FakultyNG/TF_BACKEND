@@ -442,6 +442,13 @@ Do not commit a Firebase service account JSON file. If the private key is stored
 
 Flutter should install `firebase_core` and `firebase_messaging`, request notification permission, get the FCM token after login, and call `POST /api/v1/notifications/device-token/register`. On token refresh, Flutter should call the same register endpoint again. On logout, Flutter may call `POST /api/v1/notifications/device-token/remove`. Notification taps should use the FCM `deepLink` data field and then fetch notification/history data from TF backend.
 
+Gift-card redemption codes are encrypted at rest. Set a unique production
+secret with at least 32 characters:
+
+```env
+GIFT_CARD_ENCRYPTION_KEY=
+```
+
 ## Fee Configs
 
 Fees can be updated by a `SUPER_ADMIN` or `FINANCE` admin in Swagger:

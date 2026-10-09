@@ -10,6 +10,8 @@ export interface GiftCardOrderResult {
   status: "processing" | "delivered" | "failed";
   providerReference: string;
   redemptionCode?: string;
+  redemptionInstructions?: string;
+  expiresAt?: string;
   raw?: unknown;
 }
 

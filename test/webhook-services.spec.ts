@@ -111,11 +111,24 @@ describe("webhook infrastructure", () => {
       toJson: jest.fn((value: unknown) => value)
     };
     const signatures = { verify: jest.fn().mockReturnValue(true), secret: jest.fn().mockReturnValue("secret") };
-    const service = new GiftCardProviderWebhookService(prisma as never, { reverseTransaction: jest.fn() } as never, logs as never, signatures as never);
+    const codeCipher = { encrypt: jest.fn((value: string) => `encrypted:${value}`) };
+    const service = new GiftCardProviderWebhookService(
+      prisma as never,
+      { reverseTransaction: jest.fn() } as never,
+      logs as never,
+      signatures as never,
+      codeCipher as never
+    );
 
     await service.receive({ event: "gift_card.delivered", status: "delivered", providerReference: "gc_ref_1", code: "secret-code" }, {});
 
     expect(prisma.giftCardPurchase.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "purchase_1" } }));
+    expect(codeCipher.encrypt).toHaveBeenCalledWith("secret-code");
+    expect(prisma.giftCardPurchase.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ redemptionCode: "encrypted:secret-code" })
+      })
+    );
     expect(prisma.transaction.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "txn_1" } }));
   });
 

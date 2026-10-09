@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { success } from "../common/api-response";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { CreateGiftCardDto } from "./dto/create-gift-card.dto";
 import { GiftCardQuoteDto } from "./dto/gift-card-quote.dto";
+import { GiftCardPurchaseQueryDto } from "./dto/gift-card-purchase-query.dto";
 import { GiftCardsService } from "./gift-cards.service";
 
 @ApiTags("Gift Cards")
@@ -32,6 +33,19 @@ export class GiftCardsController {
     return success("Gift card purchase submitted successfully", data);
   }
 
+  @Get("purchases")
+  async purchases(@CurrentUser() user: { sub: string }, @Query() query: GiftCardPurchaseQueryDto) {
+    const data = await this.giftCardsService.listUserPurchases(user.sub, query);
+    return success("Gift card purchases fetched successfully", data);
+  }
+
+  @Get("purchases/:purchaseId")
+  async purchaseDetails(@CurrentUser() user: { sub: string }, @Param("purchaseId") purchaseId: string) {
+    const data = await this.giftCardsService.getDetails(user.sub, purchaseId);
+    return success("Gift card details fetched successfully", data);
+  }
+
+  /** @deprecated Use GET /gift-cards/purchases/:purchaseId. */
   @Get(":id")
   async details(@CurrentUser() user: { sub: string }, @Param("id") id: string) {
     const data = await this.giftCardsService.getDetails(user.sub, id);

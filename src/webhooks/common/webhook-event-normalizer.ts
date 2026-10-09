@@ -11,6 +11,9 @@ export interface NormalizedWebhookEvent {
   currency?: string;
   accountNumber?: string;
   userId?: string;
+  redemptionCode?: string;
+  redemptionInstructions?: string;
+  expiresAt?: string;
 }
 
 type WebhookPayload = Record<string, unknown>;
@@ -44,7 +47,31 @@ export function normalizeWebhookEvent(payload: unknown): NormalizedWebhookEvent 
     amount: firstNumber(body.amount, data.amount, body.amountNgn, data.amountNgn),
     currency: firstString(body.currency, data.currency),
     accountNumber: firstString(body.accountNumber, body.account_number, data.accountNumber, data.account_number),
-    userId: firstString(body.userId, body.user_id, data.userId, data.user_id)
+    userId: firstString(body.userId, body.user_id, data.userId, data.user_id),
+    redemptionCode: firstString(
+      body.redemptionCode,
+      body.redemption_code,
+      body.giftCardCode,
+      body.gift_card_code,
+      data.redemptionCode,
+      data.redemption_code,
+      data.giftCardCode,
+      data.gift_card_code,
+      body.code,
+      data.code
+    ),
+    redemptionInstructions: firstString(
+      body.redemptionInstructions,
+      body.redemption_instructions,
+      data.redemptionInstructions,
+      data.redemption_instructions
+    ),
+    expiresAt: firstString(
+      body.expiresAt,
+      body.expires_at,
+      data.expiresAt,
+      data.expires_at
+    )
   };
 }
 

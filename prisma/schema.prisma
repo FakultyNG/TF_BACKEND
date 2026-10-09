@@ -78,6 +78,7 @@ enum GiftCardPurchaseStatus {
   delivered
   failed
   reversed
+  expired
 }
 
 enum AuthSessionStatus {
@@ -124,37 +125,37 @@ enum CashDropProfileStatus {
 }
 
 model User {
-  id           String     @id @default(cuid())
-  phoneNumber  String     @unique
+  id           String       @id @default(cuid())
+  phoneNumber  String       @unique
   passcodeHash String
-  status       UserStatus @default(active)
-  role         UserRole   @default(USER)
+  status       UserStatus   @default(active)
+  role         UserRole     @default(USER)
   walletStatus WalletStatus @default(inactive)
   supportNotes String?
   riskNotes    String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
-  profile      Profile?
-  kycRecords   KycRecord[]
-  authSessions AuthSession[]
-  auditLogs    AuditLog[]
-  wallet       Wallet?
+  profile                  Profile?
+  kycRecords               KycRecord[]
+  authSessions             AuthSession[]
+  auditLogs                AuditLog[]
+  wallet                   Wallet?
   dedicatedVirtualAccounts DedicatedVirtualAccount[]
-  transactions Transaction[]
-  walletLedger WalletLedger[]
-  giftCardPurchases GiftCardPurchase[]
-  updatedFeeConfigs FeeConfig[] @relation("FeeConfigUpdatedBy")
-  supportTickets SupportTicket[]
-  assignedSupportTickets SupportTicket[] @relation("AssignedSupportTickets")
-  trustedDevices TrustedDevice[]
-  notificationReceipts NotificationReceipt[]
-  targetedNotifications Notification[] @relation("NotificationTargetUser")
-  createdNotifications Notification[] @relation("NotificationCreatedBy")
-  cashDropProfile CashDropProfile?
-  recentBeneficiaries RecentBeneficiary[]
-  supportAttachments SupportAttachment[]
-  deviceTokens UserDeviceToken[]
+  transactions             Transaction[]
+  walletLedger             WalletLedger[]
+  giftCardPurchases        GiftCardPurchase[]
+  updatedFeeConfigs        FeeConfig[]               @relation("FeeConfigUpdatedBy")
+  supportTickets           SupportTicket[]
+  assignedSupportTickets   SupportTicket[]           @relation("AssignedSupportTickets")
+  trustedDevices           TrustedDevice[]
+  notificationReceipts     NotificationReceipt[]
+  targetedNotifications    Notification[]            @relation("NotificationTargetUser")
+  createdNotifications     Notification[]            @relation("NotificationCreatedBy")
+  cashDropProfile          CashDropProfile?
+  recentBeneficiaries      RecentBeneficiary[]
+  supportAttachments       SupportAttachment[]
+  deviceTokens             UserDeviceToken[]
 
   @@index([phoneNumber])
   @@index([role])
@@ -169,8 +170,8 @@ model Wallet {
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
-  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ledger  WalletLedger[]
+  user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ledger WalletLedger[]
 
   @@index([status])
 }
@@ -201,20 +202,20 @@ model WalletLedger {
 }
 
 model DedicatedVirtualAccount {
-  id             String    @id @default(cuid())
-  userId         String
-  provider       String
-  bankName       String
-  accountNumber  String
-  accountName    String
-  preferredBank  String?
-  status         DvaStatus @default(active)
+  id                String    @id @default(cuid())
+  userId            String
+  provider          String
+  bankName          String
+  accountNumber     String
+  accountName       String
+  preferredBank     String?
+  status            DvaStatus @default(active)
   providerReference String?
-  metadata       Json?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  metadata          Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   cashDropProfiles CashDropProfile[]
 
   @@unique([provider, accountNumber])
@@ -238,7 +239,7 @@ model CashDropProfile {
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   dva  DedicatedVirtualAccount @relation(fields: [dvaId], references: [id], onDelete: Restrict)
 
   @@index([status])
@@ -269,10 +270,10 @@ model Transaction {
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 
-  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ledger     WalletLedger[]
-  giftCardPurchase GiftCardPurchase?
-  supportTickets SupportTicket[]
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ledger              WalletLedger[]
+  giftCardPurchase    GiftCardPurchase?
+  supportTickets      SupportTicket[]
   recentBeneficiaries RecentBeneficiary[]
 
   @@index([userId])
@@ -284,24 +285,24 @@ model Transaction {
 }
 
 model RecentBeneficiary {
-  id              String          @id @default(cuid())
-  userId          String
-  type            TransactionType
-  displayName     String
-  bankName        String?
-  bankCode        String?
-  accountNumber   String?
-  accountName     String?
-  supplierName    String?
-  supplierCountry String?
-  payoutCurrency  String?
-  beneficiaryJson Json?
+  id               String          @id @default(cuid())
+  userId           String
+  type             TransactionType
+  displayName      String
+  bankName         String?
+  bankCode         String?
+  accountNumber    String?
+  accountName      String?
+  supplierName     String?
+  supplierCountry  String?
+  payoutCurrency   String?
+  beneficiaryJson  Json?
   paymentReference String?
-  transactionId   String?
-  dedupeKey       String          @unique
-  lastUsedAt      DateTime        @default(now())
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  transactionId    String?
+  dedupeKey        String          @unique
+  lastUsedAt       DateTime        @default(now())
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
@@ -319,6 +320,7 @@ model GiftCardProduct {
   currency  String
   minAmount Int
   maxAmount Int
+  imageUrl  String?
   status    GiftCardProductStatus @default(active)
   provider  String                @default("mock")
   createdAt DateTime              @default(now())
@@ -328,21 +330,24 @@ model GiftCardProduct {
 }
 
 model GiftCardPurchase {
-  id             String                 @id @default(cuid())
-  userId         String
-  transactionId  String                 @unique
-  giftCardId     String
-  giftCardName   String
-  amount         Int
-  currency       String
-  status         GiftCardPurchaseStatus @default(processing)
-  recipientEmail String?
-  provider       String                 @default("mock")
-  providerReference String?
-  redemptionCode String?
-  metadata       Json?
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
+  id                     String                 @id @default(cuid())
+  userId                 String
+  transactionId          String                 @unique
+  giftCardId             String
+  giftCardName           String
+  amount                 Int
+  currency               String
+  status                 GiftCardPurchaseStatus @default(processing)
+  recipientEmail         String?
+  provider               String                 @default("mock")
+  providerReference      String?
+  redemptionCode         String?
+  redemptionInstructions String?
+  deliveredAt            DateTime?
+  expiresAt              DateTime?
+  metadata               Json?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
 
   user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   transaction Transaction     @relation(fields: [transactionId], references: [id], onDelete: Cascade)
@@ -382,8 +387,8 @@ model FeeConfig {
 }
 
 model Profile {
-  id              String   @id @default(cuid())
-  userId          String   @unique
+  id              String    @id @default(cuid())
+  userId          String    @unique
   firstName       String?
   lastName        String?
   email           String?
@@ -391,8 +396,8 @@ model Profile {
   gender          String?
   country         String?
   profileImageUrl String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -410,9 +415,9 @@ model SupportTicket {
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 
-  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  assignedAdmin      User?             @relation("AssignedSupportTickets", fields: [assignedAdminId], references: [id], onDelete: SetNull)
-  relatedTransaction Transaction?       @relation(fields: [relatedTransactionId], references: [id], onDelete: SetNull)
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedAdmin      User?               @relation("AssignedSupportTickets", fields: [assignedAdminId], references: [id], onDelete: SetNull)
+  relatedTransaction Transaction?        @relation(fields: [relatedTransactionId], references: [id], onDelete: SetNull)
   messages           SupportMessage[]
   attachments        SupportAttachment[]
 
@@ -433,7 +438,7 @@ model SupportMessage {
   attachmentUrl String?
   createdAt     DateTime                 @default(now())
 
-  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticket      SupportTicket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   attachments SupportAttachment[]
 
   @@index([ticketId])
@@ -504,8 +509,8 @@ model Notification {
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
 
-  targetUser User? @relation("NotificationTargetUser", fields: [targetUserId], references: [id], onDelete: Cascade)
-  createdBy  User? @relation("NotificationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  targetUser User?                 @relation("NotificationTargetUser", fields: [targetUserId], references: [id], onDelete: Cascade)
+  createdBy  User?                 @relation("NotificationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   receipts   NotificationReceipt[]
 
   @@index([targetUserId])
@@ -570,35 +575,35 @@ model SecurityAudit {
 }
 
 model KycRecord {
-  id                 String    @id @default(cuid())
-  userId             String
-  kycReference       String    @unique
-  providerReference  String?
-  bvnHash            String?
-  bvnMasked          String?
-  bvnVerified        Boolean   @default(false)
-  selfieVerified     Boolean   @default(false)
-  faceMatch          Boolean   @default(false)
-  confidenceScore    Decimal?  @db.Decimal(8, 4)
-  firstName          String?
-  middleName         String?
-  lastName           String?
-  email              String?
-  phoneNumber        String?
-  dateOfBirth        DateTime?
-  gender             String?
-  country            String?
-  ninMasked          String?
-  ninHash            String?
-  imageUrl           String?
-  profileImageUrl    String?
-  rawProviderLogId   String?
-  verifiedAt         DateTime?
-  status             KycStatus @default(pending)
-  provider           String    @default("mock")
-  metadata           Json?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  userId            String
+  kycReference      String    @unique
+  providerReference String?
+  bvnHash           String?
+  bvnMasked         String?
+  bvnVerified       Boolean   @default(false)
+  selfieVerified    Boolean   @default(false)
+  faceMatch         Boolean   @default(false)
+  confidenceScore   Decimal?  @db.Decimal(8, 4)
+  firstName         String?
+  middleName        String?
+  lastName          String?
+  email             String?
+  phoneNumber       String?
+  dateOfBirth       DateTime?
+  gender            String?
+  country           String?
+  ninMasked         String?
+  ninHash           String?
+  imageUrl          String?
+  profileImageUrl   String?
+  rawProviderLogId  String?
+  verifiedAt        DateTime?
+  status            KycStatus @default(pending)
+  provider          String    @default("mock")
+  metadata          Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

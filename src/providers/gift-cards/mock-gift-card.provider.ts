@@ -17,6 +17,8 @@ export class MockGiftCardProvider implements GiftCardProviderService {
       status: "processing",
       providerReference: `mock_gift_${input.reference}`,
       redemptionCode: `MOCK-${input.reference.slice(-8).toUpperCase()}`,
+      redemptionInstructions: "Redeem with the issuing merchant.",
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
       raw: { submitted: true }
     };
   }
