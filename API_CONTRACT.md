@@ -267,10 +267,23 @@ If BVN or selfie verification has not passed, the backend returns:
 
 BVN verification is required before DVA creation, wallet activation, wallet funding, and transfers.
 
-Current KYC provider: backend-selected provider. `KYC_PROVIDER=prembly` uses Prembly server-side; `KYC_PROVIDER=mock` is for local development.
+Current KYC provider: backend-selected provider. `KYC_PROVIDER=strowallet` is the default, `KYC_PROVIDER=prembly` remains switchable server-side, and `KYC_PROVIDER=mock` is for local development.
 
 The frontend must not call KYC providers directly.
 The frontend must not call Prembly directly.
+
+Strowallet server-side implementation:
+
+- BVN details enrichment: `GET {STROWALLET_BASE_URL}/api/kyc_getbvnadvance/`
+- BVN verify: `POST {STROWALLET_BASE_URL}/api/kyc_bvn/`
+- During pre-registration BVN verification, TF backend uses the `phoneNumber` stored in the `registrationToken` session, fetches the BVN name/date-of-birth from Strowallet BVN details, and then submits those values to Strowallet Verify BVN. The mobile app still sends only `registrationToken` and `bvn`.
+
+BytID selfie KYC implementation:
+
+- BVN face match: `POST {BYTID_BASE_URL}/identity/bvn/face-match`
+- `SELFIE_KYC_PROVIDER=bytid` uses BytID only for the selfie endpoint. `KYC_PROVIDER=strowallet` can remain the default for BVN lookup/verification.
+- TF backend sends the BVN number, the selfie image, and the first name, last name, and date of birth already returned by the BVN verification step. The app must not ask the user to re-enter those identity fields.
+- To enable the camera/selfie step, set `KYC_SELFIE_REQUIRED=true` and configure `BYTID_API_KEY`.
 
 Prembly server-side implementation:
 
@@ -324,6 +337,8 @@ The frontend captures the selfie image and sends it to TF backend.
 TF backend cleans the base64 image and calls the KYC provider.
 
 The frontend must not call Prembly or any provider directly.
+
+When `KYC_SELFIE_REQUIRED=false`, the frontend should skip this camera step after BVN success and continue to registration completion/PIN creation. The app can read the public feature config at `GET /cash-drop/config`.
 
 ## Request
 
@@ -1813,6 +1828,7 @@ Important:
 - The backend returns receiver payment details if a safe match is found.
 - The frontend must not perform image matching locally.
 - The frontend must not expose raw DVA lookup logic.
+- The frontend must call `GET /cash-drop/config` before showing CashDrop camera actions. If `featureEnabled=false`, do not request camera permission and do not show scan/register actions.
 
 
 ## Product Flow
@@ -1834,6 +1850,31 @@ Another user taps Scan to Pay
 → Flutter redirects to NGN transfer screen
 → Receiver DVA details are auto-populated
 ```
+
+---
+
+## Feature Config
+
+`GET /cash-drop/config`
+
+This endpoint is public and is used by the mobile app before opening CashDrop or KYC selfie camera flows.
+
+### Success Response
+
+```json
+{
+  "success": true,
+  "message": "CashDrop config fetched successfully",
+  "data": {
+    "featureEnabled": false,
+    "kycSelfieRequired": false
+  }
+}
+```
+
+Frontend behavior:
+- if `featureEnabled=false`, hide or disable CashDrop camera actions and do not call `/cash-drop/register` or `/cash-drop/resolve`.
+- if `kycSelfieRequired=false`, skip the registration selfie camera step after BVN verification.
 
 ---
 
@@ -1913,10 +1954,27 @@ The backend should:
   "success": true,
   "message": "CashDrop status fetched successfully",
   "data": {
+    "featureEnabled": true,
     "enabled": true,
     "CashDropId": "cashdrop_12345",
     "profileImageUrl": "https://res.cloudinary.com/dcqfxryee/profileimage/upload/v174852/profile_usr_12345.jpg",
     "status": "active"
+  }
+}
+```
+
+When CashDrop is disabled by env, status returns:
+
+```json
+{
+  "success": true,
+  "message": "CashDrop status fetched successfully",
+  "data": {
+    "featureEnabled": false,
+    "enabled": false,
+    "CashDropId": null,
+    "profileImageUrl": null,
+    "status": "disabled_by_config"
   }
 }
 ```
@@ -2011,21 +2069,23 @@ The backend should:
 For CashDrop scanning, the Flutter app should:
 
 ```text
-1. Use the "CasDrop to Pay" button.
-2. Invoke the phone camera using Flutter camera/image capture package.
-3. Capture the receiver's displayed profile image.
-4. Convert captured image to base64.
-5. Send captured image to POST /cash-drop/resolve.
-6. If success, navigate to NGN transfer screen.
-7. Auto-populate:
+1. Call GET /cash-drop/config.
+2. If featureEnabled=false, keep CashDrop disabled and do not invoke camera.
+3. Use the "CashDrop to Pay" button only when enabled.
+4. Invoke the phone camera using Flutter camera/image capture package.
+5. Capture the receiver's displayed profile image.
+6. Convert captured image to base64.
+7. Send captured image to POST /cash-drop/resolve.
+8. If success, navigate to NGN transfer screen.
+9. Auto-populate:
    - receiverId
    - displayName
    - profileImageUrl
    - bankName
    - accountNumber
    - accountName
-8. User enters amount.
-9. User confirms transfer.
+10. User enters amount.
+11. User confirms transfer.
 ```
 
 Recommended Flutter packages:

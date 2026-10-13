@@ -64,6 +64,7 @@ export class TransfersService {
       bankName: account.bankName,
       accountNumber: dto.accountNumber,
       accountName: account.accountName,
+      nameEnquiryReference: account.providerReference,
       amount: dto.amount,
       fee,
       totalDebit,
@@ -111,7 +112,8 @@ export class TransfersService {
         accountNumber: quote.accountNumber,
         bankCode: quote.bankCode,
         narration: narration || quote.narration,
-        reference
+        reference,
+        nameEnquiryReference: quote.nameEnquiryReference
       });
       const provider = providerResult.provider ?? "mock_lync";
       await this.updateTransactionProvider(

@@ -93,9 +93,11 @@ describe("pre-registration KYC onboarding", () => {
         dateOfBirth: "1990-01-01",
         country: "NG",
         rawProviderResponse: { status: true }
-      }),
+      })
+    };
+    const selfieKycProvider = {
       verifyBvnWithSelfie: jest.fn().mockResolvedValue({
-        provider: "mock",
+        provider: "bytid",
         providerReference: "mock_ref_2",
         bvnMasked: "*******8901",
         bvnVerified: true,
@@ -117,6 +119,7 @@ describe("pre-registration KYC onboarding", () => {
       createDva: jest.fn().mockResolvedValue({ accountNumber: "1234567890" })
     };
     const cashDrop = {
+      isEnabled: jest.fn().mockReturnValue(true),
       register: jest.fn().mockResolvedValue({ CashDropId: "cashdrop_1" })
     };
 
@@ -128,11 +131,12 @@ describe("pre-registration KYC onboarding", () => {
       jwt as never,
       config as never,
       kycProvider as never,
+      selfieKycProvider as never,
       cloudinary as never,
       wallet as never,
       cashDrop as never
     );
-    return { service, redis, redisStore, usersRepository, prisma, txClient, kycProvider, cloudinary, wallet, cashDrop };
+    return { service, redis, redisStore, usersRepository, prisma, txClient, kycProvider, selfieKycProvider, cloudinary, wallet, cashDrop };
   }
 
   it("verifies BVN against a registration token and stores temporary KYC state", async () => {
@@ -144,7 +148,9 @@ describe("pre-registration KYC onboarding", () => {
       firstName: "Ada"
     });
 
-    expect(kycProvider.verifyBvn).toHaveBeenCalledWith("12345678901", `registration:${registrationToken}`);
+    expect(kycProvider.verifyBvn).toHaveBeenCalledWith("12345678901", `registration:${registrationToken}`, {
+      phoneNumber: "+2347057109319"
+    });
     expect(redis.setJson).toHaveBeenCalledWith(
       registrationKey,
       expect.objectContaining({
@@ -162,7 +168,7 @@ describe("pre-registration KYC onboarding", () => {
   });
 
   it("validates selfie for a pre-registration KYC reference and keeps the secure Cloudinary URL", async () => {
-    const { service, redisStore, cloudinary, kycProvider } = makeService();
+    const { service, redisStore, cloudinary, selfieKycProvider } = makeService();
     const bvn = await service.verifyRegistrationBvn(registrationToken, "12345678901");
     const selfie = "data:image/jpeg;base64,aGVsbG8=";
 
@@ -173,7 +179,14 @@ describe("pre-registration KYC onboarding", () => {
     });
 
     expect(cloudinary.uploadBase64Image).toHaveBeenCalledWith(selfie, "tf/users/kyc-selfies", `${bvn.kycReference}.jpg`);
-    expect(kycProvider.verifyBvnWithSelfie).toHaveBeenCalledWith("12345678901", "aGVsbG8=", `registration:${registrationToken}`);
+    expect(selfieKycProvider.verifyBvnWithSelfie).toHaveBeenCalledWith("12345678901", "aGVsbG8=", `registration:${registrationToken}`, {
+      phoneNumber: "+2347057109319",
+      firstName: "Ada",
+      middleName: undefined,
+      lastName: "Lovelace",
+      dateOfBirth: "1990-01-01",
+      reference: bvn.kycReference
+    });
     expect((redisStore.get(registrationKey) as { kyc: { bvn?: string; selfieImageUrl: string } }).kyc.bvn).toBeUndefined();
     expect((redisStore.get(registrationKey) as { kyc: { selfieImageUrl: string } }).kyc.selfieImageUrl).toBe(
       "https://res.cloudinary.com/tf/selfie.jpg"
@@ -200,7 +213,7 @@ describe("pre-registration KYC onboarding", () => {
         data: expect.objectContaining({
           userId: "user_1",
           kycReference: bvn.kycReference,
-          provider: "mock",
+          provider: "bytid",
           providerReference: "mock_ref_2",
           bvnVerified: true,
           selfieVerified: true,

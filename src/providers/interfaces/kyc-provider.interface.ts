@@ -40,8 +40,17 @@ export interface SelfieValidationResult {
   rawProviderResponse?: unknown;
 }
 
+export interface KycVerificationContext {
+  phoneNumber?: string;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  dateOfBirth?: string;
+  reference?: string;
+}
+
 export interface KycProvider {
-  verifyBvn(bvn: string, userId?: string): Promise<BvnVerificationResult>;
-  verifyBvnWithSelfie(bvn: string, selfieImageBase64: string, userId?: string): Promise<SelfieValidationResult>;
+  verifyBvn(bvn: string, userId?: string, context?: KycVerificationContext): Promise<BvnVerificationResult>;
+  verifyBvnWithSelfie(bvn: string, selfieImageBase64: string, userId?: string, context?: KycVerificationContext): Promise<SelfieValidationResult>;
   getVerificationStatus(providerReference: string): Promise<BvnVerificationResult | SelfieValidationResult>;
 }

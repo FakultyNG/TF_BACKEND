@@ -16,7 +16,16 @@ export class CashDropService {
     private readonly config: ConfigService
   ) {}
 
+  isEnabled() {
+    return ["1", "true", "yes", "on"].includes(this.config.get<string>("CASH_DROP_ENABLED", "true").toLowerCase());
+  }
+
+  isKycSelfieRequired() {
+    return ["1", "true", "yes", "on"].includes(this.config.get<string>("KYC_SELFIE_REQUIRED", "true").toLowerCase());
+  }
+
   async register(userId: string, sourceImageBase64?: string) {
+    this.enforceEnabled();
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -71,12 +80,14 @@ export class CashDropService {
   }
 
   async status(userId: string) {
+    const featureEnabled = this.isEnabled();
     const profile = await this.prisma.cashDropProfile.findUnique({ where: { userId } });
     return {
-      enabled: profile?.status === CashDropProfileStatus.active,
+      featureEnabled,
+      enabled: featureEnabled && profile?.status === CashDropProfileStatus.active,
       CashDropId: profile?.id ?? null,
       profileImageUrl: profile?.profileImageUrl ?? null,
-      status: profile?.status ?? "not_registered"
+      status: featureEnabled ? profile?.status ?? "not_registered" : "disabled_by_config"
     };
   }
 
@@ -98,6 +109,7 @@ export class CashDropService {
   }
 
   async resolve(userId: string, scannedImageBase64: string) {
+    this.enforceEnabled();
     await this.enforceResolveRateLimit(userId);
     let scanned;
     try {
@@ -225,6 +237,12 @@ export class CashDropService {
     const attempts = await this.redis.incrementWithTtl(`cash-drop-resolve:${userId}`, ttl);
     if (attempts > max) {
       throw new ApiException("Too many CashDrop resolve attempts", "CASH_DROP_RATE_LIMITED", HttpStatus.TOO_MANY_REQUESTS);
+    }
+  }
+
+  private enforceEnabled() {
+    if (!this.isEnabled()) {
+      throw new ApiException("CashDrop is disabled", "CASH_DROP_DISABLED", HttpStatus.FORBIDDEN);
     }
   }
 

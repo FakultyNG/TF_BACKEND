@@ -8,6 +8,7 @@ describe("CashDropService", () => {
     profiles?: unknown[];
     confidence?: number;
     resolveAttempts?: number;
+    config?: Record<string, string>;
   }) => {
     const prisma = {
       user: {
@@ -33,7 +34,7 @@ describe("CashDropService", () => {
     const redis = {
       incrementWithTtl: jest.fn().mockResolvedValue(overrides.resolveAttempts ?? 1)
     };
-    const config = { get: jest.fn((_key: string, fallback: string) => fallback) };
+    const config = { get: jest.fn((key: string, fallback: string) => overrides.config?.[key] ?? fallback) };
     return { service: new CashDropService(prisma as never, fingerprint as never, redis as never, config as never), prisma, fingerprint };
   };
 
@@ -69,6 +70,21 @@ describe("CashDropService", () => {
       linkedToDva: true
     });
     expect(prisma.cashDropProfile.upsert).toHaveBeenCalled();
+  });
+
+  it("blocks registration and resolve when CashDrop is disabled by config", async () => {
+    const { service } = createService({
+      user: eligibleUser,
+      config: { CASH_DROP_ENABLED: "false" }
+    });
+
+    await expect(service.register("user_1")).rejects.toMatchObject({ code: "CASH_DROP_DISABLED" });
+    await expect(service.resolve("scanner_1", "data:image/png;base64,test")).rejects.toMatchObject({ code: "CASH_DROP_DISABLED" });
+    await expect(service.status("user_1")).resolves.toMatchObject({
+      featureEnabled: false,
+      enabled: false,
+      status: "disabled_by_config"
+    });
   });
 
   it("resolves a confident image match to receiver payment details", async () => {

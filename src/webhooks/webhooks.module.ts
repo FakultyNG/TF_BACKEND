@@ -4,6 +4,7 @@ import { WalletModule } from "../wallet/wallet.module";
 import { CashDropModule } from "../cash-drop/cash-drop.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { GiftCardsModule } from "../gift-cards/gift-cards.module";
+import { StrowalletModule } from "../providers/strowallet/strowallet.module";
 import { AdminWebhooksController } from "./admin-webhooks.controller";
 import { AdminWebhooksService } from "./admin-webhooks.service";
 import { WebhookLogService } from "./common/webhook-log.service";
@@ -24,6 +25,8 @@ import { PayoutProviderWebhookController } from "./payout-provider/payout-provid
 import { PayoutProviderWebhookService } from "./payout-provider/payout-provider-webhook.service";
 import { SendchampWebhookController } from "./sendchamp/sendchamp-webhook.controller";
 import { SendchampWebhookService } from "./sendchamp/sendchamp-webhook.service";
+import { StrowalletWebhookController } from "./strowallet/strowallet-webhook.controller";
+import { StrowalletWebhookService } from "./strowallet/strowallet-webhook.service";
 
 @Module({
   imports: [
@@ -31,7 +34,8 @@ import { SendchampWebhookService } from "./sendchamp/sendchamp-webhook.service";
     WalletModule,
     CashDropModule,
     NotificationsModule,
-    GiftCardsModule
+    GiftCardsModule,
+    StrowalletModule
   ],
   controllers: [
     LyncWebhookController,
@@ -40,6 +44,7 @@ import { SendchampWebhookService } from "./sendchamp/sendchamp-webhook.service";
     PayoutProviderWebhookController,
     GiftCardProviderWebhookController,
     SendchampWebhookController,
+    StrowalletWebhookController,
     AdminWebhooksController
   ],
   providers: [
@@ -55,6 +60,7 @@ import { SendchampWebhookService } from "./sendchamp/sendchamp-webhook.service";
     PayoutProviderWebhookService,
     GiftCardProviderWebhookService,
     SendchampWebhookService,
+    StrowalletWebhookService,
     AdminWebhooksService
   ],
   exports: [WebhookLogService]

@@ -8,6 +8,7 @@ export interface ResolvedAccount {
   accountNumber: string;
   bankCode: string;
   bankName: string;
+  providerReference?: string;
 }
 
 export interface BankAccountSuggestion extends ResolvedAccount {
@@ -31,5 +32,7 @@ export interface NgnTransferProviderService {
     bankCode: string;
     narration?: string;
     reference: string;
+    nameEnquiryReference?: string;
+    senderName?: string;
   }): Promise<NgnTransferResult>;
 }

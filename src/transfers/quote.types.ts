@@ -4,6 +4,7 @@ export interface NgnQuote {
   bankName: string;
   accountNumber: string;
   accountName: string;
+  nameEnquiryReference?: string;
   amount: number;
   fee: number;
   totalDebit: number;

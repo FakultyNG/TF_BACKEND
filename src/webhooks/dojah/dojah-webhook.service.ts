@@ -115,7 +115,9 @@ export class DojahWebhookService {
   private async autoProvisionAfterKycVerified(userId: string) {
     try {
       await this.walletService.createDva(userId, "auto");
-      await this.cashDropService.register(userId);
+      if (this.cashDropService.isEnabled()) {
+        await this.cashDropService.register(userId);
+      }
       await this.prisma.auditLog.create({
         data: {
           actorId: userId,
@@ -123,7 +125,7 @@ export class DojahWebhookService {
           action: "KYC_WEBHOOK_AUTO_PROVISION_COMPLETED",
           entityType: "User",
           entityId: userId,
-          metadata: {}
+          metadata: { cashDropEnabled: this.cashDropService.isEnabled() }
         }
       });
     } catch (error) {

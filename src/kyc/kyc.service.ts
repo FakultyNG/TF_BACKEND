@@ -5,7 +5,7 @@ import { v4 as uuid } from "uuid";
 import { ApiException } from "../common/errors/api.exception";
 import { sha256 } from "../common/utils/hash.util";
 import { PrismaService } from "../prisma/prisma.service";
-import { KYC_PROVIDER } from "../providers/provider.tokens";
+import { KYC_PROVIDER, SELFIE_KYC_PROVIDER } from "../providers/provider.tokens";
 import { KycProvider } from "../providers/interfaces/kyc-provider.interface";
 import { RedisService } from "../redis/redis.service";
 import { WalletService } from "../wallet/wallet.service";
@@ -21,7 +21,8 @@ export class KycService {
     private readonly walletService: WalletService,
     private readonly cashDropService: CashDropService,
     private readonly cloudinaryService: CloudinaryService,
-    @Inject(KYC_PROVIDER) private readonly kycProvider: KycProvider
+    @Inject(KYC_PROVIDER) private readonly kycProvider: KycProvider,
+    @Inject(SELFIE_KYC_PROVIDER) private readonly selfieKycProvider: KycProvider
   ) {}
 
   async verifyBvn(userId: string, bvn: string) {
@@ -101,7 +102,13 @@ export class KycService {
       "tf/users/kyc-selfies",
       `${kycReference}.jpg`
     );
-    const result = await this.kycProvider.verifyBvnWithSelfie(tempSession.bvn, cleaned, userId);
+    const result = await this.selfieKycProvider.verifyBvnWithSelfie(tempSession.bvn, cleaned, userId, {
+      firstName: record.firstName ?? undefined,
+      middleName: record.middleName ?? undefined,
+      lastName: record.lastName ?? undefined,
+      dateOfBirth: formatDateForProvider(record.dateOfBirth),
+      reference: kycReference
+    });
     const providerLogId = await this.logKycProvider(result.provider, "kyc_bvn_face_validate", kycReference, result.providerReference, result.faceMatch ? "success" : "failed", result.rawProviderResponse);
     const profileImageUrl = result.faceMatch ? uploadedSelfie.secureUrl : result.profileImageUrl;
     await this.prisma.$transaction([
@@ -235,7 +242,7 @@ export class KycService {
     try {
       await this.walletService.activateWallet(userId);
       const dva = await this.walletService.createDva(userId, "auto");
-      const cashDrop = await this.cashDropService.register(userId, selfieImageBase64);
+      const cashDrop = this.cashDropService.isEnabled() ? await this.cashDropService.register(userId, selfieImageBase64) : undefined;
       await this.prisma.auditLog.create({
         data: {
           actorId: userId,
@@ -243,14 +250,14 @@ export class KycService {
           action: "KYC_AUTO_PROVISION_COMPLETED",
           entityType: "User",
           entityId: userId,
-          metadata: { dvaReady: true, cashDropId: cashDrop.CashDropId }
+          metadata: { dvaReady: true, cashDropEnabled: this.cashDropService.isEnabled(), cashDropId: cashDrop?.CashDropId }
         }
       });
       return {
         walletActivated: true,
         dvaReady: true,
-        cashDropRegistered: true,
-        cashDropId: cashDrop.CashDropId,
+        cashDropRegistered: Boolean(cashDrop),
+        cashDropId: cashDrop?.CashDropId,
         dva
       };
     } catch (error) {
@@ -279,4 +286,12 @@ function parseProviderDate(value?: string) {
   if (!value) return undefined;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
+function formatDateForProvider(value?: Date | null) {
+  if (!value) return undefined;
+  const year = value.getUTCFullYear();
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(value.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
