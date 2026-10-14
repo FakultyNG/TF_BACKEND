@@ -22,7 +22,12 @@ async function bootstrap() {
   const apiPrefix = config.get<string>("API_PREFIX", "api/v1");
   const jsonBodyLimit = config.get<string>("JSON_BODY_LIMIT", "10mb");
 
-  app.use(json({ limit: jsonBodyLimit }));
+  app.use(json({
+    limit: jsonBodyLimit,
+    verify: (request: Request & { rawBody?: Buffer }, _response, buffer) => {
+      request.rawBody = Buffer.from(buffer);
+    }
+  }));
   app.use(urlencoded({ extended: true, limit: jsonBodyLimit }));
   app.use((error: unknown, _request: Request, response: Response, next: NextFunction) => {
     const parserError = error as { status?: number; type?: string };

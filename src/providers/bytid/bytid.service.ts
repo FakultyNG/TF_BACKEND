@@ -24,7 +24,10 @@ export class BytidKycProvider implements KycProvider {
   }
 
   async verifyBvn(bvn: string, _userId?: string, context?: KycVerificationContext): Promise<BvnVerificationResult> {
-    const raw = await this.post("/identity/bvn", this.identityPayload(bvn, context));
+    const raw = await this.post(
+      this.config.get<string>("BYTID_BVN_PATH", "/identity/bvn"),
+      this.identityPayload(bvn, context)
+    );
     return this.mapBvnResult(raw, bvn);
   }
 
@@ -113,9 +116,11 @@ export class BytidKycProvider implements KycProvider {
       });
       return response.data;
     } catch (error) {
+      if (error instanceof ApiException) throw error;
       const message = providerMessage(error);
-      this.logger.warn({ provider: "bytid", method, url, message });
-      throw new ApiException("BytID provider request failed", "BYTID_PROVIDER_ERROR", HttpStatus.BAD_GATEWAY);
+      const diagnostics = providerDiagnostics(error);
+      this.logger.warn({ provider: "bytid", method, url, message, ...diagnostics });
+      throw new ApiException("BytID BVN verification request failed", "BYTID_PROVIDER_ERROR", HttpStatus.BAD_GATEWAY, diagnostics);
     }
   }
 
@@ -194,4 +199,15 @@ function providerMessage(error: unknown) {
   if (!axios.isAxiosError(error)) return error instanceof Error ? error.message : "BytID request failed";
   const axiosError = error as AxiosError<{ error?: { message?: string }; message?: string }>;
   return axiosError.response?.data?.error?.message || axiosError.response?.data?.message || axiosError.message;
+}
+
+function providerDiagnostics(error: unknown) {
+  if (!axios.isAxiosError(error)) return undefined;
+  const body = objectOrEmpty(error.response?.data);
+  const providerError = objectOrEmpty(body.error);
+  return stripUndefined({
+    providerStatus: error.response?.status,
+    providerCode: firstString(providerError.code, body.code),
+    requestId: firstString(body.request_id)
+  });
 }

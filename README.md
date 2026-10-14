@@ -165,7 +165,7 @@ For Render staging, use `SWAGGER_ENABLED=true`, `SWAGGER_BASIC_AUTH_ENABLED=true
 - Cloudinary is the official file storage adapter. Local development without credentials returns mock secure URLs and does not store files on disk.
 - Firebase Cloud Messaging is push delivery only. TF database notifications remain the source of truth.
 - Local `.env` can keep `FCM_ENABLED=false` to avoid real Firebase sends while developing. Set it to `true` with Firebase credentials to send live pushes.
-- KYC provider is selected server-side with `KYC_PROVIDER`. Use `mock` locally or `prembly` with real Prembly credentials on staging/production.
+- KYC provider is selected server-side with `KYC_PROVIDER`. Strowallet is the default; `bytid`, `prembly`, and `mock` are also supported.
 - Refresh tokens are stored only as bcrypt hashes in PostgreSQL.
 - Passcodes are stored only as bcrypt hashes in PostgreSQL.
 - BVN is stored as a SHA-256 hash, not plain text.
@@ -219,7 +219,18 @@ PREMBLY_WEBHOOK_SECRET=<your configured webhook secret>
 KYC_FACE_MATCH_THRESHOLD=95
 ```
 
-The mobile endpoints do not change. TF backend calls Prembly BVN Advance and BVN + Face Validation, stores only hashed/masked BVN/NIN values in PostgreSQL, keeps the raw BVN only in Redis for the temporary KYC/session TTL needed between BVN and selfie validation, and stores sanitized provider responses in `ProviderLog`.
+For BytID BVN verification, set:
+
+```env
+KYC_PROVIDER=bytid
+BYTID_BASE_URL=https://api.bytid.com/v1
+BYTID_API_KEY=<from BytID dashboard>
+BYTID_BVN_PATH=/identity/bvn
+```
+
+Keep `KYC_PROVIDER=strowallet` (or omit it) to use the default Strowallet integration.
+
+The mobile endpoints do not change when the provider changes. TF backend calls the configured BVN and selfie providers, stores only hashed/masked BVN/NIN values in PostgreSQL, keeps the raw BVN only in Redis for the temporary KYC/session TTL needed between BVN and selfie validation, and stores sanitized provider responses in `ProviderLog`.
 
 3. Click `Authorize` in Swagger and paste only the access token value, without `Bearer`.
 

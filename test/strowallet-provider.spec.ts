@@ -118,6 +118,45 @@ describe("Strowallet provider", () => {
       })
     );
   });
+
+  it("continues to the documented BVN verification endpoint when optional details enrichment fails", async () => {
+    const service = new StrowalletService(config({
+      STROWALLET_PUBLIC_KEY: "pk_test",
+      STROWALLET_KYC_DEFAULT_FIRST_NAME: "JOHN",
+      STROWALLET_KYC_DEFAULT_LAST_NAME: "DOE",
+      STROWALLET_KYC_DEFAULT_DOB: "01-01-1990"
+    }), {} as never);
+    const request = jest.spyOn((service as never) as { request: jest.Mock }, "request")
+      .mockRejectedValueOnce(new Error("details endpoint unavailable"))
+      .mockResolvedValueOnce({ status: "success", reference: "bvn_ref_fallback" });
+
+    await expect(service.verifyBvn("12345678901", "registration:reg_temp_123", {
+      phoneNumber: "+2347057109319"
+    })).resolves.toMatchObject({
+      providerReference: "bvn_ref_fallback",
+      bvnVerified: true,
+      firstName: "JOHN",
+      lastName: "DOE",
+      dateOfBirth: "01-01-1990",
+      phoneNumber: "07057109319"
+    });
+
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "post",
+      "/api/kyc_bvn/",
+      undefined,
+      expect.objectContaining({
+        public_key: "pk_test",
+        number: "12345678901",
+        firstName: "JOHN",
+        lastName: "DOE",
+        dateOfBirth: "01-01-1990",
+        phoneNumber: "07057109319",
+        mode: "sandbox"
+      })
+    );
+  });
 });
 
 describe("Strowallet webhooks", () => {

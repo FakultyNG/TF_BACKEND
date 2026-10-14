@@ -256,8 +256,16 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
       return response.data;
     } catch (error) {
       const message = providerMessage(error);
-      this.logger.warn({ provider: "strowallet", method, url, message });
-      throw new ApiException("Strowallet provider request failed", "STROWALLET_PROVIDER_ERROR", HttpStatus.BAD_GATEWAY);
+      const diagnostics = providerDiagnostics(error);
+      this.logger.warn({ provider: "strowallet", method, url, message, ...diagnostics });
+      throw new ApiException(
+        url === this.config.get<string>("STROWALLET_BVN_PATH", "/api/kyc_bvn/")
+          ? "Strowallet BVN verification request failed"
+          : "Strowallet provider request failed",
+        "STROWALLET_PROVIDER_ERROR",
+        HttpStatus.BAD_GATEWAY,
+        diagnostics
+      );
     }
   }
 
@@ -290,7 +298,7 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
     const fallbackLastName = this.config.get<string>("STROWALLET_KYC_DEFAULT_LAST_NAME", "DOE");
     const fallbackDob = this.config.get<string>("STROWALLET_KYC_DEFAULT_DOB", "01-01-1990");
     if (!userId || userId.startsWith("registration:")) {
-      const bvnIdentity: StrowalletBvnIdentity = bvn ? await this.getBvnDetails(bvn) : {};
+      const bvnIdentity = await this.getBvnDetailsBestEffort(bvn);
       const identity = {
         firstName: firstString(bvnIdentity.firstName, fallbackFirstName)?.toUpperCase(),
         lastName: firstString(bvnIdentity.lastName, fallbackLastName)?.toUpperCase(),
@@ -300,13 +308,29 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
       return this.requireIdentity(identity);
     }
     const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { profile: true } });
-    const bvnIdentity: StrowalletBvnIdentity = bvn ? await this.getBvnDetails(bvn) : {};
+    const hasStoredIdentity = Boolean(user?.profile?.firstName && user.profile.lastName && user.profile.dateOfBirth);
+    const bvnIdentity = hasStoredIdentity ? {} : await this.getBvnDetailsBestEffort(bvn);
     return this.requireIdentity({
       firstName: firstString(user?.profile?.firstName, bvnIdentity.firstName, fallbackFirstName)?.toUpperCase(),
       lastName: firstString(user?.profile?.lastName, bvnIdentity.lastName, fallbackLastName)?.toUpperCase(),
       dateOfBirth: formatStrowalletDate(user?.profile?.dateOfBirth) || normalizeStrowalletDateString(firstString(bvnIdentity.dateOfBirth, fallbackDob)),
       phoneNumber: toLocalPhone(firstString(context?.phoneNumber, user?.phoneNumber, bvnIdentity.phoneNumber, fallbackPhone) || fallbackPhone)
     });
+  }
+
+  private async getBvnDetailsBestEffort(bvn?: string): Promise<StrowalletBvnIdentity> {
+    if (!bvn) return {};
+    try {
+      return await this.getBvnDetails(bvn);
+    } catch (error) {
+      this.logger.warn({
+        provider: "strowallet",
+        operation: "bvn_details_enrichment",
+        message: error instanceof Error ? error.message : "Strowallet BVN details enrichment failed",
+        fallback: "configured identity defaults"
+      });
+      return {};
+    }
   }
 
   private async getBvnDetails(bvn: string): Promise<StrowalletBvnIdentity> {
@@ -412,6 +436,16 @@ function providerMessage(error: unknown) {
   if (!axios.isAxiosError(error)) return error instanceof Error ? error.message : "Strowallet request failed";
   const axiosError = error as AxiosError<{ message?: string; detail?: string; error?: string }>;
   return axiosError.response?.data?.message || axiosError.response?.data?.detail || axiosError.response?.data?.error || axiosError.message;
+}
+
+function providerDiagnostics(error: unknown) {
+  if (!axios.isAxiosError(error)) return undefined;
+  const body = objectOrEmpty(error.response?.data);
+  return stripUndefined({
+    providerStatus: error.response?.status,
+    providerCode: firstString(body.code, body.responseCode, body.response_code),
+    requestId: firstString(body.requestId, body.request_id, body.reference)
+  });
 }
 
 function maskIdentifier(value: string) {

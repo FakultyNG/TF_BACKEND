@@ -9,6 +9,8 @@ import { AdminWebhooksController } from "./admin-webhooks.controller";
 import { AdminWebhooksService } from "./admin-webhooks.service";
 import { WebhookLogService } from "./common/webhook-log.service";
 import { WebhookSignatureService } from "./common/webhook-signature.service";
+import { BytidWebhookController } from "./bytid/bytid-webhook.controller";
+import { BytidWebhookService } from "./bytid/bytid-webhook.service";
 import { DojahWebhookController } from "./dojah/dojah-webhook.controller";
 import { DojahWebhookService } from "./dojah/dojah-webhook.service";
 import { GiftCardProviderWebhookController } from "./gift-card-provider/gift-card-provider-webhook.controller";
@@ -45,6 +47,7 @@ import { StrowalletWebhookService } from "./strowallet/strowallet-webhook.servic
     GiftCardProviderWebhookController,
     SendchampWebhookController,
     StrowalletWebhookController,
+    BytidWebhookController,
     AdminWebhooksController
   ],
   providers: [
@@ -61,6 +64,7 @@ import { StrowalletWebhookService } from "./strowallet/strowallet-webhook.servic
     GiftCardProviderWebhookService,
     SendchampWebhookService,
     StrowalletWebhookService,
+    BytidWebhookService,
     AdminWebhooksService
   ],
   exports: [WebhookLogService]

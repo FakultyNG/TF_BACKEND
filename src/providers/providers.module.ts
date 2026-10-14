@@ -32,10 +32,17 @@ const bankingProviderFactory = (config: ConfigService, strowallet: StrowalletSer
   return mock;
 };
 
-const kycProviderFactory = (config: ConfigService, strowallet: StrowalletService, prembly: PremblyKycProvider, mock: MockKycProvider) => {
+export const kycProviderFactory = (
+  config: ConfigService,
+  strowallet: StrowalletService,
+  prembly: PremblyKycProvider,
+  bytid: BytidKycProvider,
+  mock: MockKycProvider
+) => {
   const provider = config.get<string>("KYC_PROVIDER", "strowallet").toLowerCase();
   if (provider === "strowallet") return strowallet;
   if (provider === "prembly") return prembly;
+  if (provider === "bytid") return bytid;
   return mock;
 };
 
@@ -76,7 +83,7 @@ export const otpProviderFactory = (config: ConfigService, sendchamp: SendchampOt
     {
       provide: KYC_PROVIDER,
       useFactory: kycProviderFactory,
-      inject: [ConfigService, StrowalletService, PremblyKycProvider, MockKycProvider]
+      inject: [ConfigService, StrowalletService, PremblyKycProvider, BytidKycProvider, MockKycProvider]
     },
     {
       provide: SELFIE_KYC_PROVIDER,

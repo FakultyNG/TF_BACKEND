@@ -267,7 +267,7 @@ If BVN or selfie verification has not passed, the backend returns:
 
 BVN verification is required before DVA creation, wallet activation, wallet funding, and transfers.
 
-Current KYC provider: backend-selected provider. `KYC_PROVIDER=strowallet` is the default, `KYC_PROVIDER=prembly` remains switchable server-side, and `KYC_PROVIDER=mock` is for local development.
+Current KYC provider: backend-selected provider. `KYC_PROVIDER=strowallet` is the default; `KYC_PROVIDER=bytid` and `KYC_PROVIDER=prembly` are switchable server-side, and `KYC_PROVIDER=mock` is for local development.
 
 The frontend must not call KYC providers directly.
 The frontend must not call Prembly directly.
@@ -280,10 +280,12 @@ Strowallet server-side implementation:
 
 BytID selfie KYC implementation:
 
+- BVN lookup: `POST {BYTID_BASE_URL}/identity/bvn` when `KYC_PROVIDER=bytid`
 - BVN face match: `POST {BYTID_BASE_URL}/identity/bvn/face-match`
 - `SELFIE_KYC_PROVIDER=bytid` uses BytID only for the selfie endpoint. `KYC_PROVIDER=strowallet` can remain the default for BVN lookup/verification.
 - TF backend sends the BVN number, the selfie image, and the first name, last name, and date of birth already returned by the BVN verification step. The app must not ask the user to re-enter those identity fields.
 - To enable the camera/selfie step, set `KYC_SELFIE_REQUIRED=true` and configure `BYTID_API_KEY`.
+- Configure BytID dashboard webhooks to `POST {PUBLIC_API_BASE_URL}/api/v1/webhooks/bytid`. TF verifies `Bytid-Signature` with `BYTID_WEBHOOK_SECRET`, logs the event, deduplicates `Bytid-Event-Id`, and updates matched KYC records from `verification.completed` / `kyc.completed` events.
 
 Prembly server-side implementation:
 
