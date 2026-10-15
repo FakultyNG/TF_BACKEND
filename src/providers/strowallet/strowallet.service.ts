@@ -38,16 +38,17 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
     const accountName = this.config.get<string>("STROWALLET_ACCOUNT_NAME_PREFIX", "Transfa")
       ? `${this.config.get<string>("STROWALLET_ACCOUNT_NAME_PREFIX", "Transfa")} ${firstName} ${lastName}`
       : `${firstName} ${lastName}`;
+    const path = this.dvaPath(input.preferredBank);
     const payload = {
       public_key: this.publicKey(),
-      email: input.email || this.config.get<string>("STROWALLET_FALLBACK_EMAIL", "notifications@transfa.local"),
+      email: this.customerEmail(input),
       account_name: accountName.trim().toUpperCase(),
-      phone: input.phoneNumber,
+      phone: toLocalPhone(input.phoneNumber),
       webhook_url: this.virtualAccountWebhookUrl(),
       mode: this.mode(),
       developer_code: this.config.get<string>("STROWALLET_DEVELOPER_CODE") || undefined
     };
-    const raw = await this.post(this.config.get<string>("STROWALLET_STERLING_DVA_PATH", "/api/virtual-bank/sterling"), payload);
+    const raw = await this.post(path, payload);
     const body = unwrap(raw);
     const accountNumber = firstString(
       body.accountNumber,
@@ -61,7 +62,7 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
       throw new ApiException("Strowallet virtual account response did not include an account number", "STROWALLET_DVA_RESPONSE_INVALID", HttpStatus.BAD_GATEWAY);
     }
     return {
-      bankName: firstString(body.bankName, body.bank_name, body.bank, body.bank_name_slug) || "Sterling Bank",
+      bankName: firstString(body.bankName, body.bank_name, body.bank, body.bank_name_slug) || (path.includes("sterling") ? "Sterling Bank" : "Nombank MFB"),
       accountNumber,
       accountName: firstString(body.accountName, body.account_name, body.name) || payload.account_name,
       provider: "strowallet",
@@ -266,11 +267,15 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
       const message = providerMessage(error);
       const diagnostics = providerDiagnostics(error);
       this.logger.warn({ provider: "strowallet", method, url, message, ...diagnostics });
+      const isDvaRequest = url === this.config.get<string>("STROWALLET_DVA_PATH", "/api/virtual-bank/new-customer/") ||
+        url === this.config.get<string>("STROWALLET_STERLING_DVA_PATH", "/api/virtual-bank/sterling");
       throw new ApiException(
         url === this.config.get<string>("STROWALLET_BVN_DETAILS_PATH", "/api/kyc_getbvn/")
           ? "Strowallet BVN details request failed"
+          : isDvaRequest
+          ? publicDvaError(message)
           : "Strowallet provider request failed",
-        "STROWALLET_PROVIDER_ERROR",
+        isDvaRequest ? "STROWALLET_DVA_REQUEST_FAILED" : "STROWALLET_PROVIDER_ERROR",
         HttpStatus.BAD_GATEWAY,
         diagnostics
       );
@@ -284,7 +289,28 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
   }
 
   private mode() {
-    return this.config.get<string>("STROWALLET_MODE", "sandbox").trim();
+    return this.config.get<string>("STROWALLET_MODE", "live").trim().toLowerCase();
+  }
+
+  private dvaPath(preferredBank?: string) {
+    const bank = preferredBank?.trim().toLowerCase();
+    if (bank === "sterling" || bank === "sterling bank") {
+      return this.config.get<string>("STROWALLET_STERLING_DVA_PATH", "/api/virtual-bank/sterling");
+    }
+    return this.config.get<string>("STROWALLET_DVA_PATH", "/api/virtual-bank/new-customer/");
+  }
+
+  private customerEmail(input: CreateDvaInput) {
+    const supplied = input.email?.trim().toLowerCase();
+    if (supplied && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supplied)) return supplied;
+    const configuredDomain = this.config.get<string>("STROWALLET_CUSTOMER_EMAIL_DOMAIN", "customers.transfaintel.xyz")
+      .trim()
+      .toLowerCase();
+    const domain = /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(configuredDomain)
+      ? configuredDomain
+      : "customers.transfaintel.xyz";
+    const customerId = input.userId.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 48) || sha256(input.phoneNumber).slice(0, 24);
+    return `transfa.${customerId}@${domain}`;
   }
 
   private virtualAccountWebhookUrl() {
@@ -411,6 +437,21 @@ function providerDiagnostics(error: unknown) {
     providerCode: firstString(body.code, body.responseCode, body.response_code),
     requestId: firstString(body.requestId, body.request_id, body.reference)
   });
+}
+
+function publicDvaError(message: string) {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("public key") || normalized.includes("api key") || normalized.includes("unauthor")) {
+    return "Strowallet rejected the live account credentials";
+  }
+  if (normalized.includes("developer") && normalized.includes("code")) {
+    return "Strowallet requires a valid developer code for this account type";
+  }
+  if (normalized.includes("email")) return "Strowallet rejected the customer email for this account";
+  if (normalized.includes("phone")) return "Strowallet rejected the customer phone number for this account";
+  if (normalized.includes("webhook")) return "Strowallet rejected the virtual-account webhook URL";
+  if (normalized.includes("mode") || normalized.includes("sandbox")) return "Strowallet rejected the configured live account mode";
+  return "Strowallet could not create the dedicated virtual account";
 }
 
 function maskIdentifier(value: string) {

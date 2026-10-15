@@ -27,7 +27,8 @@ describe("Strowallet provider", () => {
       phoneNumber: "08100000000",
       firstName: "John",
       lastName: "Doe",
-      email: "john@example.com"
+      email: "john@example.com",
+      preferredBank: "sterling"
     });
 
     expect(result).toMatchObject({
@@ -40,6 +41,36 @@ describe("Strowallet provider", () => {
     expect(request).toHaveBeenCalledWith("post", "/api/virtual-bank/sterling", expect.objectContaining({
       public_key: "pk_test",
       webhook_url: "https://api.example.com/api/v1/webhooks/strowallet/virtual-account"
+    }), undefined);
+  });
+
+  it("uses the default live endpoint for auto DVA creation and derives a unique valid email", async () => {
+    const service = new StrowalletService(config({
+      STROWALLET_PUBLIC_KEY: "pk_live",
+      STROWALLET_VIRTUAL_ACCOUNT_WEBHOOK_URL: "https://api.example.com/api/v1/webhooks/strowallet/virtual-account"
+    }), {} as never);
+    const request = jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+      data: {
+        account_number: "1234567890",
+        account_name: "TRANSFA JOHN DOE",
+        bank_name: "Nombank MFB",
+        customer_id: "cust_1",
+        status: "active"
+      }
+    });
+
+    await service.createDedicatedVirtualAccount({
+      userId: "user_123",
+      phoneNumber: "+2348100000000",
+      firstName: "John",
+      lastName: "Doe",
+      preferredBank: "auto"
+    });
+
+    expect(request).toHaveBeenCalledWith("post", "/api/virtual-bank/new-customer/", expect.objectContaining({
+      email: "transfa.user123@customers.transfaintel.xyz",
+      phone: "08100000000",
+      mode: "live"
     }), undefined);
   });
 

@@ -651,6 +651,14 @@ DVA is created only after required KYC is completed.
 
 Backend uses verified BVN and phone number to request DVA from provider.
 
+With Strowallet, `preferredBank: "auto"` uses the provider's default
+`/api/virtual-bank/new-customer/` route. The bank-specific Sterling route is
+used only when `preferredBank` explicitly requests Sterling. Production must
+set `STROWALLET_MODE=live`, a live `STROWALLET_PUBLIC_KEY`, and a public HTTPS
+webhook URL. If the verified BVN record contains no email, the backend derives
+a unique provider-only address under `STROWALLET_CUSTOMER_EMAIL_DOMAIN`; it
+does not write that fallback address into the customer's profile.
+
 Frontend must not call provider directly.
 
 1. Create Dedicated Virtual Account
