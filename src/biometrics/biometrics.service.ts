@@ -44,6 +44,20 @@ export class BiometricsService {
     return { enabled: false };
   }
 
+  async authorizeTransfer(userId: string, deviceId: string) {
+    const device = await this.prisma.trustedDevice.findFirst({
+      where: { userId, deviceId, enabled: true }
+    });
+    if (!device) {
+      throw new ApiException("Biometric authorization is not enabled for this device", "BIOMETRIC_NOT_ENABLED", HttpStatus.UNAUTHORIZED);
+    }
+    await this.prisma.trustedDevice.update({
+      where: { id: device.id },
+      data: { lastUsedAt: new Date() }
+    });
+    await this.securityAudit(userId, "BIOMETRIC_TRANSFER_AUTHORIZED", deviceId);
+  }
+
   async login(deviceId: string, meta: { ipAddress?: string; userAgent?: string }) {
     const attemptsKey = `biometric-login-attempts:${deviceId}`;
     const attempts = await this.redis.incrementWithTtl(attemptsKey, 900);

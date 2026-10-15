@@ -1,8 +1,9 @@
-import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { HttpStatus, Inject, Injectable, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma, TransactionStatus, TransactionType } from "@prisma/client";
 import { v4 as uuid } from "uuid";
 import { AuthService } from "../auth/auth.service";
+import { BiometricsService } from "../biometrics/biometrics.service";
 import { ApiException } from "../common/errors/api.exception";
 import { FxPayoutProviderService } from "../providers/fx-payout/fx-payout-provider.interface";
 import { PricingService } from "../pricing/pricing.service";
@@ -27,7 +28,8 @@ export class TransfersService {
     private readonly pricingService: PricingService,
     private readonly recentBeneficiaries: RecentBeneficiariesService,
     @Inject(NGN_TRANSFER_PROVIDER) private readonly ngnProvider: NgnTransferProviderService,
-    @Inject(FX_PAYOUT_PROVIDER) private readonly fxProvider: FxPayoutProviderService
+    @Inject(FX_PAYOUT_PROVIDER) private readonly fxProvider: FxPayoutProviderService,
+    @Optional() private readonly biometricsService?: BiometricsService
   ) {}
 
   async getBanks() {
@@ -84,8 +86,8 @@ export class TransfersService {
     };
   }
 
-  async confirmNgn(userId: string, quoteId: string, passcode: string, narration?: string) {
-    await this.authService.verifyUserPasscode(userId, passcode);
+  async confirmNgn(userId: string, quoteId: string, passcode?: string, narration?: string, biometricDeviceId?: string) {
+    await this.authorizeTransfer(userId, passcode, biometricDeviceId);
     const quote = await this.getQuote<NgnQuote>(quoteId, userId);
     const balance = await this.walletService.getBalance(userId);
     if (balance.balance < quote.totalDebit) {
@@ -94,7 +96,7 @@ export class TransfersService {
     const reference = `txn_ngn_${uuid().replace(/-/g, "").slice(0, 12)}`;
     const debit = await this.walletService.debitWallet({
       userId,
-      amount: quote.totalDebit,
+      amount: quote.amount,
       fee: quote.fee,
       totalDebit: quote.totalDebit,
       type: TransactionType.ngn_transfer,
@@ -129,8 +131,14 @@ export class TransfersService {
         transactionId: debit.transaction.id,
         status: providerResult.status,
         amount: quote.amount,
+        fee: quote.fee,
+        totalDebit: quote.totalDebit,
         currency: "NGN",
-        narration: narration || quote.narration
+        narration: narration || quote.narration,
+        reference,
+        accountName: quote.accountName,
+        accountNumber: quote.accountNumber,
+        bankName: quote.bankName
       };
     } catch (error) {
       await this.reverseProviderFailure(debit.transaction.id, "Provider failed before NGN transfer submission");
@@ -167,8 +175,8 @@ export class TransfersService {
     return { quoteId, ...this.toFxQuoteResponse(quote) };
   }
 
-  async confirmFx(userId: string, payoutCurrency: "USD" | "CNY", quoteId: string, passcode: string, purpose?: string) {
-    await this.authService.verifyUserPasscode(userId, passcode);
+  async confirmFx(userId: string, payoutCurrency: "USD" | "CNY", quoteId: string, passcode?: string, purpose?: string, biometricDeviceId?: string) {
+    await this.authorizeTransfer(userId, passcode, biometricDeviceId);
     const quote = await this.getQuote<FxQuote>(quoteId, userId);
     if (quote.payoutCurrency !== payoutCurrency) {
       throw new ApiException("Invalid transfer quote", "INVALID_QUOTE", HttpStatus.BAD_REQUEST);
@@ -278,5 +286,19 @@ export class TransfersService {
       reverseTransaction?: (adminId: string | undefined, transactionId: string, reason: string) => Promise<unknown>;
     };
     return wallet.reverseTransaction?.(undefined, transactionId, reason);
+  }
+
+  private authorizeTransfer(userId: string, passcode?: string, biometricDeviceId?: string) {
+    if (passcode && biometricDeviceId) {
+      throw new ApiException("Choose either biometric authorization or passcode", "MULTIPLE_TRANSFER_AUTH_METHODS", HttpStatus.BAD_REQUEST);
+    }
+    if (biometricDeviceId) {
+      if (!this.biometricsService) {
+        throw new ApiException("Biometric authorization is unavailable", "BIOMETRIC_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE);
+      }
+      return this.biometricsService.authorizeTransfer(userId, biometricDeviceId);
+    }
+    if (passcode) return this.authService.verifyUserPasscode(userId, passcode);
+    throw new ApiException("Transfer authorization is required", "TRANSFER_AUTHORIZATION_REQUIRED", HttpStatus.UNAUTHORIZED);
   }
 }

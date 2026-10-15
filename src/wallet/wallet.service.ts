@@ -208,7 +208,8 @@ export class WalletService {
   async debitWallet(input: WalletMutationInput) {
     return this.prisma.$transaction(async (tx) => {
       const wallet = await this.ensureWalletTx(tx, input.userId, WalletStatus.active);
-      if (wallet.balance < input.amount) {
+      const debitAmount = input.totalDebit ?? input.amount;
+      if (wallet.balance < debitAmount) {
         throw new ApiException("Insufficient wallet balance", "INSUFFICIENT_BALANCE", HttpStatus.BAD_REQUEST);
       }
       const transaction = await tx.transaction.create({
@@ -232,7 +233,7 @@ export class WalletService {
         }
       });
       const balanceBefore = wallet.balance;
-      const balanceAfter = balanceBefore - input.amount;
+      const balanceAfter = balanceBefore - debitAmount;
       const updatedWallet = await tx.wallet.update({ where: { id: wallet.id }, data: { balance: balanceAfter } });
       const ledger = await tx.walletLedger.create({
         data: {
@@ -240,7 +241,7 @@ export class WalletService {
           userId: input.userId,
           transactionId: transaction.id,
           entryType: input.entryType ?? LedgerEntryType.debit,
-          amount: input.amount,
+          amount: debitAmount,
           balanceBefore,
           balanceAfter,
           reference: input.reference,

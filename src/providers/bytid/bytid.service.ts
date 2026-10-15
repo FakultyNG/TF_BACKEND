@@ -162,6 +162,7 @@ export class BytidKycProvider implements KycProvider {
       firstName: firstString(person.first_name, person.firstName),
       middleName: firstString(person.middle_name, person.middleName),
       lastName: firstString(person.last_name, person.lastName),
+      email: firstString(person.email, person.email_address, person.emailAddress),
       phoneNumber: firstString(person.phone_number, person.phoneNumber),
       dateOfBirth: normalizeBytidDob(rawDob) || rawDob,
       gender: firstString(person.gender),

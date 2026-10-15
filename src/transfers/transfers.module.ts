@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
+import { BiometricsModule } from "../biometrics/biometrics.module";
 import { PricingModule } from "../pricing/pricing.module";
 import { ProvidersModule } from "../providers/providers.module";
 import { RedisModule } from "../redis/redis.module";
@@ -10,7 +11,7 @@ import { RecentBeneficiariesController } from "./recent-beneficiaries.controller
 import { RecentBeneficiariesService } from "./recent-beneficiaries.service";
 
 @Module({
-  imports: [AuthModule, PricingModule, ProvidersModule, RedisModule, WalletModule],
+  imports: [AuthModule, BiometricsModule, PricingModule, ProvidersModule, RedisModule, WalletModule],
   controllers: [TransfersController, RecentBeneficiariesController],
   providers: [TransfersService, RecentBeneficiariesService],
   exports: [TransfersService, RecentBeneficiariesService]

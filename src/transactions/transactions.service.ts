@@ -53,20 +53,27 @@ export class TransactionsService {
       reference: transaction.reference,
       description: transaction.description,
       narration: transaction.narration,
+      ...this.safeTransferDetails(transaction.metadata),
       createdAt: transaction.createdAt,
       completedAt: transaction.completedAt,
       relatedDetails: this.safeRelatedDetails(transaction)
     };
   }
 
-  private toListItem(transaction: { id: string; type: TransactionType; amount: number; currency: string; status: TransactionStatus; description: string | null; createdAt: Date }) {
+  private toListItem(transaction: { id: string; type: TransactionType; amount: number; fee: number; totalDebit: number; currency: string; status: TransactionStatus; reference: string; description: string | null; narration: string | null; metadata: unknown; createdAt: Date }) {
+    const transfer = this.safeTransferDetails(transaction.metadata);
     return {
       id: transaction.id,
       type: transaction.type,
       amount: transaction.amount,
+      fee: transaction.fee,
+      totalDebit: transaction.totalDebit,
       currency: transaction.currency,
       status: transaction.status,
+      reference: transaction.reference,
       description: transaction.description,
+      narration: transaction.narration,
+      ...transfer,
       createdAt: transaction.createdAt
     };
   }
@@ -83,9 +90,23 @@ export class TransactionsService {
     if (transaction.type === TransactionType.usd_transfer || transaction.type === TransactionType.cny_transfer) {
       return { payoutAmount: transaction.payoutAmount, payoutCurrency: transaction.payoutCurrency };
     }
+    if (transaction.type === TransactionType.ngn_transfer) {
+      return this.safeTransferDetails((transaction as { metadata?: unknown }).metadata);
+    }
     if (transaction.supportTickets?.length) {
       return { supportTickets: transaction.supportTickets };
     }
     return null;
+  }
+
+  private safeTransferDetails(metadata: unknown) {
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {};
+    const value = metadata as Record<string, unknown>;
+    return {
+      counterpartyName: typeof value.accountName === "string" ? value.accountName : undefined,
+      counterpartyAccount: typeof value.accountNumber === "string" ? value.accountNumber : undefined,
+      bankName: typeof value.bankName === "string" ? value.bankName : undefined,
+      bankCode: typeof value.bankCode === "string" ? value.bankCode : undefined
+    };
   }
 }

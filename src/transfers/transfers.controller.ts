@@ -82,7 +82,7 @@ export class TransfersController {
 
   @Post("ngn/confirm")
   async ngnConfirm(@CurrentUser() user: { sub: string }, @Body() dto: ConfirmTransferDto) {
-    const data = await this.transfersService.confirmNgn(user.sub, dto.quoteId, dto.passcode, dto.narration);
+    const data = await this.transfersService.confirmNgn(user.sub, dto.quoteId, dto.passcode, dto.narration, dto.biometricDeviceId);
     return success("Transfer submitted successfully", data);
   }
 
@@ -94,7 +94,7 @@ export class TransfersController {
 
   @Post("usd/confirm")
   async usdConfirm(@CurrentUser() user: { sub: string }, @Body() dto: ConfirmTransferDto) {
-    const data = await this.transfersService.confirmFx(user.sub, "USD", dto.quoteId, dto.passcode, dto.purpose);
+    const data = await this.transfersService.confirmFx(user.sub, "USD", dto.quoteId, dto.passcode, dto.purpose, dto.biometricDeviceId);
     return success("USD transfer submitted successfully", data);
   }
 
@@ -106,7 +106,7 @@ export class TransfersController {
 
   @Post("cny/confirm")
   async cnyConfirm(@CurrentUser() user: { sub: string }, @Body() dto: ConfirmTransferDto) {
-    const data = await this.transfersService.confirmFx(user.sub, "CNY", dto.quoteId, dto.passcode, dto.purpose);
+    const data = await this.transfersService.confirmFx(user.sub, "CNY", dto.quoteId, dto.passcode, dto.purpose, dto.biometricDeviceId);
     return success("CNY transfer submitted successfully", data);
   }
 }

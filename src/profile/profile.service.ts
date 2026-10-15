@@ -87,7 +87,7 @@ export class ProfileService {
     walletStatus: string;
     supportNotes?: string | null;
     riskNotes?: string | null;
-    profile: { firstName: string | null; lastName: string | null; email: string | null; dateOfBirth: Date | null; gender?: string | null; profileImageUrl: string | null } | null;
+    profile: { firstName: string | null; lastName: string | null; email: string | null; dateOfBirth: Date | null; gender?: string | null; country?: string | null; profileImageUrl: string | null } | null;
     kycRecords: Array<{ status: string }>;
     trustedDevices?: Array<{ enabled: boolean }>;
   }) {
@@ -99,6 +99,7 @@ export class ProfileService {
       phoneNumber: user.phoneNumber,
       dateOfBirth: this.formatDate(user.profile?.dateOfBirth ?? null),
       gender: user.profile?.gender ?? null,
+      country: user.profile?.country ?? null,
       profileImageUrl: user.profile?.profileImageUrl ?? null,
       kycStatus: user.kycRecords[0]?.status ?? "not_started",
       walletStatus: user.walletStatus,

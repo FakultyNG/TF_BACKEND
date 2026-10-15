@@ -41,7 +41,54 @@ describe("recent beneficiaries and support attachments", () => {
 
     await service.confirmNgn("user_1", "quote_1", "12345");
 
+    expect(wallet.debitWallet).toHaveBeenCalledWith(expect.objectContaining({
+      amount: 1000,
+      fee: 100,
+      totalDebit: 1100
+    }));
     expect(recent.saveOrUpdateNgnBeneficiary).toHaveBeenCalledWith("user_1", quote, "txn_1");
+  });
+
+  it("authorizes NGN transfer with an enabled biometric device instead of passcode", async () => {
+    const quote = {
+      userId: "user_1",
+      bankCode: "044",
+      bankName: "Access Bank",
+      accountNumber: "1234567890",
+      accountName: "Ada Musa",
+      amount: 1000,
+      fee: 100,
+      totalDebit: 1100,
+      currency: "NGN",
+      expiresAt: new Date(Date.now() + 60000).toISOString()
+    };
+    const redis = { getJson: jest.fn().mockResolvedValue(quote), del: jest.fn() };
+    const wallet = {
+      getBalance: jest.fn().mockResolvedValue({ balance: 5000 }),
+      debitWallet: jest.fn().mockResolvedValue({ transaction: { id: "txn_1" } }),
+      updateTransactionProvider: jest.fn(),
+      logProvider: jest.fn()
+    };
+    const auth = { verifyUserPasscode: jest.fn() };
+    const recent = { saveOrUpdateNgnBeneficiary: jest.fn() };
+    const ngnProvider = { submitTransfer: jest.fn().mockResolvedValue({ providerReference: "prov_1", status: TransactionStatus.processing, raw: {} }) };
+    const biometrics = { authorizeTransfer: jest.fn() };
+    const service = new TransfersService(
+      redis as never,
+      wallet as never,
+      auth as never,
+      {} as never,
+      {} as never,
+      recent as never,
+      ngnProvider as never,
+      {} as never,
+      biometrics as never
+    );
+
+    await service.confirmNgn("user_1", "quote_1", undefined, undefined, "device_1");
+
+    expect(biometrics.authorizeTransfer).toHaveBeenCalledWith("user_1", "device_1");
+    expect(auth.verifyUserPasscode).not.toHaveBeenCalled();
   });
 
   it("updates duplicate recent beneficiary lastUsedAt instead of creating a new row", async () => {

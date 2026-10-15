@@ -915,10 +915,15 @@ POST /transfers/ngn/confirm
 ```json
 {
   "quoteId": "quote_ngn_12345",
-  "passcode": "12345",
+  "biometricDeviceId": "device_12345",
   "narration": "TF Transfer"
 }
 ```
+
+Exactly one authorization method is required. Send `biometricDeviceId` only
+after a successful local Face ID/fingerprint prompt on an enabled trusted
+device. If biometric authentication is unavailable or cancelled, send the
+user's 5-digit `passcode` instead.
 
 ## Success Response
 ```json
@@ -929,8 +934,14 @@ POST /transfers/ngn/confirm
     "transactionId": "txn_002",
     "status": "processing",
     "amount": 10000,
+    "fee": 50,
+    "totalDebit": 10050,
     "currency": "NGN",
-    "narration": "TF Transfer"
+    "narration": "TF Transfer",
+    "reference": "TF-20260525-001",
+    "accountName": "John Musa",
+    "accountNumber": "0123456789",
+    "bankName": "Access Bank"
   }
 }
 ```
@@ -1439,6 +1450,13 @@ GET /transactions
         "currency": "NGN",
         "status": "successful",
         "description": "Wallet funding",
+        "fee": 0,
+        "totalDebit": 50000,
+        "reference": "TF-20260525-001",
+        "counterpartyName": "John Musa",
+        "counterpartyAccount": "0123456789",
+        "bankName": "Access Bank",
+        "narration": "TF Transfer",
         "createdAt": "2026-05-25T10:30:00Z"
       }
     ],
@@ -1493,6 +1511,8 @@ GET /profile
     "phoneNumber": "2348103100000",
     "dateOfBirth": "yyyy-mm-dd",
     "gender": "Male",
+    "country": "Nigeria",
+    "profileImageUrl": "https://cdn.example.com/kyc-selfie.jpg",
     "kycStatus": "verified",
     "walletStatus": "active"
   }
@@ -1560,7 +1580,7 @@ Get Biometric Status
 
 1. Get Biometric Status
 
-GET /auth/biometric/status
+GET /auth/biometric/status?deviceId=device_12345
 
 ### Success Response
 ```json

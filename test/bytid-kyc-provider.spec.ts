@@ -53,6 +53,7 @@ describe("BytID KYC provider", () => {
           first_name: "ADAEZE",
           last_name: "OKAFOR",
           date_of_birth: "15-Jan-1990",
+          email: "adaeze@example.com",
           phone_number: "08000000000"
         }
       }
@@ -69,6 +70,7 @@ describe("BytID KYC provider", () => {
       bvnVerified: true,
       firstName: "ADAEZE",
       lastName: "OKAFOR",
+      email: "adaeze@example.com",
       dateOfBirth: "1990-01-15"
     });
     expect(request).toHaveBeenCalledWith("post", "/identity/bvn", {
