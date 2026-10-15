@@ -12,6 +12,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { KycProvider } from "../providers/interfaces/kyc-provider.interface";
 import { KYC_PROVIDER, SELFIE_KYC_PROVIDER } from "../providers/provider.tokens";
 import { RedisService } from "../redis/redis.service";
+import { OtpService } from "../otp/otp.service";
 import { CloudinaryService } from "../uploads/cloudinary.service";
 import { UsersRepository } from "../users/users.repository";
 import { UsersService } from "../users/users.service";
@@ -33,31 +34,37 @@ export class AuthService {
     @Inject(SELFIE_KYC_PROVIDER) private readonly selfieKycProvider: KycProvider,
     private readonly cloudinaryService: CloudinaryService,
     private readonly walletService: WalletService,
-    private readonly cashDropService: CashDropService
+    private readonly cashDropService: CashDropService,
+    private readonly otpService: OtpService
   ) {}
 
   async startRegistration(phoneNumber: string) {
     const normalized = normalizePhoneNumber(phoneNumber);
-    const existing = await this.usersRepository.findByPhoneNumber(normalized);
+    const [existing, existingToken] = await Promise.all([
+      this.usersRepository.findByPhoneNumber(normalized),
+      this.redis.getJson<string>(`registration-phone:${normalized}`)
+    ]);
     if (existing) throw new ApiException("User already exists", "USER_ALREADY_EXISTS", HttpStatus.CONFLICT);
-    const existingToken = await this.redis.getJson<string>(`registration-phone:${normalized}`);
-    if (existingToken) {
-      return { registrationToken: existingToken, phoneNumber: normalized, requiresOtp: true };
+    const registrationToken = existingToken ?? `reg_temp_${uuid().replace(/-/g, "").slice(0, 12)}`;
+    const ttl = Number(this.config.get<string>("REGISTRATION_TTL_SECONDS", "900"));
+    if (!existingToken) {
+      const session: RegistrationSession = {
+        phoneNumber: normalized,
+        requiresOtp: true,
+        createdAt: new Date().toISOString()
+      };
+      await Promise.all([
+        this.redis.setJson(`registration:${registrationToken}`, session, ttl),
+        this.redis.setJson(`registration-phone:${normalized}`, registrationToken, ttl)
+      ]);
     }
-    const registrationToken = `reg_temp_${uuid().replace(/-/g, "").slice(0, 12)}`;
-    const session: RegistrationSession = {
+    const challenge = await this.otpService.sendOtp(normalized);
+    return {
+      registrationToken,
       phoneNumber: normalized,
       requiresOtp: true,
-      createdAt: new Date().toISOString()
+      otpReference: challenge.otpReference
     };
-    const ttl = Number(this.config.get<string>("REGISTRATION_TTL_SECONDS", "900"));
-    await this.redis.setJson(
-      `registration:${registrationToken}`,
-      session,
-      ttl
-    );
-    await this.redis.setJson(`registration-phone:${normalized}`, registrationToken, ttl);
-    return { registrationToken, phoneNumber: normalized, requiresOtp: true };
   }
 
   async verifyRegistrationBvn(registrationToken: string, bvn: string) {
@@ -106,7 +113,7 @@ export class AuthService {
     });
     const kyc: RegistrationKycState = {
       ...session.kyc,
-      bvn: undefined,
+      bvn: result.faceMatch ? undefined : session.kyc.bvn,
       providerReference: result.providerReference ?? session.kyc.providerReference,
       bvnMasked: result.bvnMasked ?? session.kyc.bvnMasked,
       providerResult: { ...session.kyc.providerResult, ...result },

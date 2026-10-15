@@ -18,7 +18,9 @@ export class CashDropController {
   config() {
     return success("CashDrop config fetched successfully", {
       featureEnabled: this.cashDropService.isEnabled(),
-      kycSelfieRequired: this.cashDropService.isKycSelfieRequired()
+      kycSelfieRequired: this.cashDropService.isKycSelfieRequired(),
+      selfieCountdownEnabled: this.cashDropService.isSelfieCountdownEnabled(),
+      selfieCountdownSeconds: this.cashDropService.getSelfieCountdownSeconds()
     });
   }
 

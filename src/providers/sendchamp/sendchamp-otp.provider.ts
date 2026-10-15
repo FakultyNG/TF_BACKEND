@@ -1,6 +1,8 @@
 import { HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import axios, { AxiosInstance } from "axios";
+import { Agent as HttpAgent } from "http";
+import { Agent as HttpsAgent } from "https";
 import { ApiException } from "../../common/errors/api.exception";
 import { ConfirmOtpInput, OtpConfirmResult, OtpProvider, OtpSendResult, SendOtpInput } from "../interfaces/otp-provider.interface";
 
@@ -14,6 +16,8 @@ export class SendchampOtpProvider implements OtpProvider {
     this.client = axios.create({
       baseURL: this.config.get<string>("SENDCHAMP_BASE_URL", "https://api.sendchamp.com/api/v1"),
       timeout: Number(this.config.get<number>("SENDCHAMP_TIMEOUT_MS", 15000)),
+      httpAgent: new HttpAgent({ keepAlive: true }),
+      httpsAgent: new HttpsAgent({ keepAlive: true }),
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",

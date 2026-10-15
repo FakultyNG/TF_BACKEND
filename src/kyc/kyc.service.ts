@@ -173,7 +173,7 @@ export class KycService {
       })
     ]);
     if (result.faceMatch) await this.autoProvisionAfterKycVerified(userId, selfieImageBase64);
-    await this.redis.del(`kyc-temp:${kycReference}`);
+    if (result.faceMatch) await this.redis.del(`kyc-temp:${kycReference}`);
     return {
       kycStatus: result.faceMatch ? "verified" : "rejected",
       faceMatch: result.faceMatch,

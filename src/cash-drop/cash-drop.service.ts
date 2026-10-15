@@ -24,6 +24,17 @@ export class CashDropService {
     return ["1", "true", "yes", "on"].includes(this.config.get<string>("KYC_SELFIE_REQUIRED", "true").toLowerCase());
   }
 
+  isSelfieCountdownEnabled() {
+    return ["1", "true", "yes", "on"].includes(
+      this.config.get<string>("KYC_SELFIE_COUNTDOWN_ENABLED", "true").toLowerCase()
+    );
+  }
+
+  getSelfieCountdownSeconds() {
+    const configured = Number(this.config.get<string>("KYC_SELFIE_COUNTDOWN_SECONDS", "5"));
+    return Number.isFinite(configured) ? Math.min(10, Math.max(1, Math.round(configured))) : 5;
+  }
+
   async register(userId: string, sourceImageBase64?: string) {
     this.enforceEnabled();
     const user = await this.prisma.user.findUnique({

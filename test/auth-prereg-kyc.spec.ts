@@ -122,6 +122,12 @@ describe("pre-registration KYC onboarding", () => {
       isEnabled: jest.fn().mockReturnValue(true),
       register: jest.fn().mockResolvedValue({ CashDropId: "cashdrop_1" })
     };
+    const otp = {
+      sendOtp: jest.fn().mockResolvedValue({
+        phoneNumber: session.phoneNumber,
+        otpReference: "otp_ref_123"
+      })
+    };
 
     const service = new AuthService(
       prisma as never,
@@ -134,10 +140,23 @@ describe("pre-registration KYC onboarding", () => {
       selfieKycProvider as never,
       cloudinary as never,
       wallet as never,
-      cashDrop as never
+      cashDrop as never,
+      otp as never
     );
-    return { service, redis, redisStore, usersRepository, prisma, txClient, kycProvider, selfieKycProvider, cloudinary, wallet, cashDrop };
+    return { service, redis, redisStore, usersRepository, prisma, txClient, kycProvider, selfieKycProvider, cloudinary, wallet, cashDrop, otp };
   }
+
+  it("starts registration and sends the initial OTP in one request", async () => {
+    const { service, otp } = makeService();
+
+    await expect(service.startRegistration("07057109319")).resolves.toMatchObject({
+      registrationToken: expect.stringMatching(/^reg_temp_/),
+      phoneNumber: "2347057109319",
+      requiresOtp: true,
+      otpReference: "otp_ref_123"
+    });
+    expect(otp.sendOtp).toHaveBeenCalledWith("2347057109319");
+  });
 
   it("verifies BVN against a registration token and stores temporary KYC state", async () => {
     const { service, redis, redisStore, kycProvider } = makeService();
@@ -196,6 +215,32 @@ describe("pre-registration KYC onboarding", () => {
     expect((redisStore.get(registrationKey) as { kyc: { selfieImageUrl: string } }).kyc.selfieImageUrl).toBe(
       "https://res.cloudinary.com/tf/selfie.jpg"
     );
+  });
+
+  it("retains the session BVN after a failed face match so selfie retry can work", async () => {
+    const { service, redisStore, selfieKycProvider } = makeService();
+    const bvn = await service.verifyRegistrationBvn(registrationToken, "12345678901");
+    selfieKycProvider.verifyBvnWithSelfie.mockResolvedValueOnce({
+      provider: "bytid",
+      bvnMasked: "*******8901",
+      bvnVerified: true,
+      faceMatch: false,
+      selfieVerified: false,
+      confidenceScore: 45,
+      rawProviderResponse: { status: true }
+    });
+
+    await expect(
+      service.validateRegistrationSelfie(
+        registrationToken,
+        bvn.kycReference,
+        "data:image/jpeg;base64,aGVsbG8="
+      )
+    ).resolves.toMatchObject({ faceMatch: false, kycStatus: "rejected" });
+
+    expect(
+      (redisStore.get(registrationKey) as { kyc: { bvn?: string } }).kyc.bvn
+    ).toBe("12345678901");
   });
 
   it("creates the user and attaches verified pre-registration KYC on registration complete", async () => {

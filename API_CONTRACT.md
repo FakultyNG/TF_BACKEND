@@ -28,10 +28,15 @@ The Flutter app must not receive Lync credentials, raw Lync payloads, or Lync en
 Sendchamp is the backend OTP provider when `OTP_PROVIDER=sendchamp` and `OTP_DEV_MODE=false`. Flutter continues to call only TF backend routes:
 
 ```text
+POST /api/v1/auth/register/start  # creates registration session and sends its first OTP
 POST /api/v1/auth/otp/send
 POST /api/v1/auth/otp/resend
 POST /api/v1/auth/otp/validate
 ```
+
+Registration uses `register/start` for the initial OTP. `/auth/otp/send` remains
+available for standalone OTP purposes and compatibility, but the registration
+screen must not call both endpoints for the same button press.
 
 The backend calls Sendchamp `/verification/create` and `/verification/confirm`, sends SMS OTPs with route `non_dnd`, stores only the TF OTP reference and provider reference in Redis, and never exposes `SENDCHAMP_API_KEY` or raw Sendchamp payloads to Flutter. In local development only, `OTP_DEV_MODE=true` may use the fixed mock OTP `123456`.
 
@@ -199,7 +204,9 @@ POST /auth/otp/validate
 
 POST /auth/register/start
 
-This checks/verifies the user's phone number and prepares registration.
+This checks the user's phone number, prepares registration, and sends the first
+live OTP in the same request. The mobile app must not immediately follow this
+with `/auth/otp/send`; that would send a duplicate OTP and add latency.
 
 ### Request
 ```JSON
@@ -215,7 +222,8 @@ This checks/verifies the user's phone number and prepares registration.
   "data": {
     "registrationToken": "reg_temp_12345",
     "phoneNumber": "2348103100000",
-    "requiresOtp": true
+    "requiresOtp": true,
+    "otpReference": "otp_ref_12345"
   }
 }
 ```
@@ -330,7 +338,7 @@ Legacy authenticated KYC is still supported by omitting `registrationToken` and 
 
 2. Validate BVN with Selfie During Registration
 
-POST /kyc/bvn/selfie-validate
+POST /auth/register/kyc/selfie-validate
 
 This endpoint validates the user's live selfie against the BVN identity record.
 
@@ -341,6 +349,12 @@ TF backend cleans the base64 image and calls the KYC provider.
 The frontend must not call Prembly or any provider directly.
 
 When `KYC_SELFIE_REQUIRED=false`, the frontend should skip this camera step after BVN success and continue to registration completion/PIN creation. The app can read the public feature config at `GET /cash-drop/config`.
+
+If face matching returns `faceMatch=false`, the temporary registration session
+retains the already-verified BVN until its normal TTL expires. The frontend may
+reset the camera and retry this endpoint with a new selfie and the same
+`registrationToken` and `kycReference`. The raw BVN is cleared after a successful
+face match.
 
 ## Request
 
@@ -1869,7 +1883,9 @@ This endpoint is public and is used by the mobile app before opening CashDrop or
   "message": "CashDrop config fetched successfully",
   "data": {
     "featureEnabled": false,
-    "kycSelfieRequired": false
+    "kycSelfieRequired": false,
+    "selfieCountdownEnabled": true,
+    "selfieCountdownSeconds": 5
   }
 }
 ```
@@ -1877,6 +1893,8 @@ This endpoint is public and is used by the mobile app before opening CashDrop or
 Frontend behavior:
 - if `featureEnabled=false`, hide or disable CashDrop camera actions and do not call `/cash-drop/register` or `/cash-drop/resolve`.
 - if `kycSelfieRequired=false`, skip the registration selfie camera step after BVN verification.
+- if `selfieCountdownEnabled=true`, show the configured countdown before automatic capture. `selfieCountdownSeconds` is clamped by the backend to 1–10 seconds.
+- `KYC_SELFIE_COUNTDOWN_ENABLED` defaults to `true`; `KYC_SELFIE_COUNTDOWN_SECONDS` defaults to `5`.
 
 ---
 

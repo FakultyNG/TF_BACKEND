@@ -87,6 +87,18 @@ describe("CashDropService", () => {
     });
   });
 
+  it("exposes bounded selfie countdown configuration", () => {
+    const { service } = createService({
+      config: {
+        KYC_SELFIE_COUNTDOWN_ENABLED: "false",
+        KYC_SELFIE_COUNTDOWN_SECONDS: "25"
+      }
+    });
+
+    expect(service.isSelfieCountdownEnabled()).toBe(false);
+    expect(service.getSelfieCountdownSeconds()).toBe(10);
+  });
+
   it("resolves a confident image match to receiver payment details", async () => {
     const { service } = createService({
       profiles: [{
