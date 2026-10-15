@@ -357,6 +357,11 @@ reset the camera and retry this endpoint with a new selfie and the same
 `registrationToken` and `kycReference`. The raw BVN is cleared after a successful
 face match.
 
+`faceMatchStatus` is the provider outcome (`matched`, `not_matched`, or
+`unavailable`). `faceMatchReason` explains a rejection without turning a normal
+non-match into an API transport error. `livenessStatus` is `not_checked` when a
+static `selfie_image` is used and `passed` when a BytID liveness session is used.
+
 BytID non-2xx responses are mapped to safe actionable API errors instead of a
 generic provider failure. Supported codes include `BYTID_VALIDATION_ERROR`,
 `BYTID_INVALID_API_KEY`, `BYTID_INSUFFICIENT_BALANCE`,
@@ -383,12 +388,75 @@ under `error.details` for support diagnostics.
     "kycStatus": "verified",
     "faceMatch": true,
     "confidenceScore": 99.9962,
+    "faceMatchStatus": "matched",
+    "faceMatchReason": null,
+    "livenessStatus": "not_checked",
     "profileImageUrl": "https://res.cloudinary.com/dcqfxryee/image/upload/v174852/profile_usr_12345.jpg"
   }
 }
 ```
 
-3. Get KYC Status
+3. Start BytID Liveness During Registration
+
+`POST /kyc/bvn/liveness/start`
+
+Used when `KYC_SELFIE_MODE=bytid_liveness`. The backend binds the BytID session
+to the temporary registration/BVN session and returns the hosted camera URL.
+
+```json
+{
+  "registrationToken": "reg_temp_12345",
+  "kycReference": "kyc_ref_12345"
+}
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "livenessSessionId": "5f1d9c2a-3b7e-4c0d-8a6f-2e9b1c4d7a30",
+    "status": "pending",
+    "url": "https://verify.elasto.ng/liveness/...",
+    "expiresAt": "2026-10-15T12:30:00.000Z"
+  }
+}
+```
+
+4. Poll BytID Liveness Status
+
+`POST /kyc/bvn/liveness/status`
+
+The app polls this lightweight endpoint while the hosted camera is open. It sends
+only `registrationToken`, `kycReference`, and `livenessSessionId`; the camera
+image is not repeatedly uploaded. The response contains `status`, `score`,
+`reasons`, and `usableForFaceMatch`.
+
+5. Complete BytID Liveness and BVN Face Match
+
+`POST /kyc/bvn/liveness/complete`
+
+The app captures `profileImageBase64` with its front camera for the customer
+profile and CashDrop. It is not sent to BytID for matching. The backend retrieves
+the named liveness session directly from BytID, requires `status=passed` and
+`usable_for_face_match=true`, then calls `/identity/bvn/face-match` with the
+server-held BVN and `liveness_session_id`. Only after a successful live face
+match is the camera image stored as the profile/CashDrop image.
+
+```json
+{
+  "registrationToken": "reg_temp_12345",
+  "kycReference": "kyc_ref_12345",
+  "livenessSessionId": "5f1d9c2a-3b7e-4c0d-8a6f-2e9b1c4d7a30",
+  "profileImageBase64": "data:image/jpeg;base64,/9j/4AAQ..."
+}
+```
+
+While the hosted check is unfinished, `kycStatus` and `livenessStatus` are
+`pending`. A completed success has `faceMatchStatus=matched` and
+`livenessStatus=passed`. Failed and expired sessions require a new liveness
+session; BytID sessions are single-use for face matching.
+
+6. Get KYC Status
 
 GET /kyc/status
 
@@ -1893,6 +1961,7 @@ This endpoint is public and is used by the mobile app before opening CashDrop or
   "data": {
     "featureEnabled": false,
     "kycSelfieRequired": false,
+    "kycSelfieMode": "bytid_liveness",
     "selfieCountdownEnabled": true,
     "selfieCountdownSeconds": 5
   }
@@ -1902,6 +1971,7 @@ This endpoint is public and is used by the mobile app before opening CashDrop or
 Frontend behavior:
 - if `featureEnabled=false`, hide or disable CashDrop camera actions and do not call `/cash-drop/register` or `/cash-drop/resolve`.
 - if `kycSelfieRequired=false`, skip the registration selfie camera step after BVN verification.
+- `kycSelfieMode=bytid_liveness` uses the hosted live check; `static` uses the existing image face-match endpoint.
 - if `selfieCountdownEnabled=true`, show the configured countdown before automatic capture. `selfieCountdownSeconds` is clamped by the backend to 1–10 seconds.
 - `KYC_SELFIE_COUNTDOWN_ENABLED` defaults to `true`; `KYC_SELFIE_COUNTDOWN_SECONDS` defaults to `5`.
 

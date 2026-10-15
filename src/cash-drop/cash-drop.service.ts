@@ -30,6 +30,11 @@ export class CashDropService {
     );
   }
 
+  getKycSelfieMode() {
+    const mode = this.config.get<string>("KYC_SELFIE_MODE", "bytid_liveness").trim().toLowerCase();
+    return mode === "static" ? "static" : "bytid_liveness";
+  }
+
   getSelfieCountdownSeconds() {
     const configured = Number(this.config.get<string>("KYC_SELFIE_COUNTDOWN_SECONDS", "5"));
     return Number.isFinite(configured) ? Math.min(10, Math.max(1, Math.round(configured))) : 5;

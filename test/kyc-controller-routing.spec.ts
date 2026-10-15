@@ -9,7 +9,7 @@ describe("KycController routing", () => {
         bvnVerified: true
       })
     };
-    const controller = new KycController(kycService as never, authService as never);
+    const controller = new KycController(kycService as never, authService as never, {} as never);
 
     await expect(
       controller.verifyBvn({ registrationToken: "reg_temp_123", bvn: "12345678901" }, undefined)
@@ -31,7 +31,7 @@ describe("KycController routing", () => {
         faceMatch: true
       })
     };
-    const controller = new KycController(kycService as never, authService as never);
+    const controller = new KycController(kycService as never, authService as never, {} as never);
 
     await expect(
       controller.selfie(
@@ -63,7 +63,7 @@ describe("KycController routing", () => {
     const authService = {
       validateAccessToken: jest.fn().mockResolvedValue({ sub: "user_1" })
     };
-    const controller = new KycController(kycService as never, authService as never);
+    const controller = new KycController(kycService as never, authService as never, {} as never);
 
     await expect(controller.verifyBvn({ bvn: "12345678901" }, "Bearer access_token")).resolves.toMatchObject({
       success: true,
@@ -72,5 +72,53 @@ describe("KycController routing", () => {
 
     expect(authService.validateAccessToken).toHaveBeenCalledWith("access_token");
     expect(kycService.verifyBvn).toHaveBeenCalledWith("user_1", "12345678901");
+  });
+
+  it("routes registration liveness start and completion without trusting client identity data", async () => {
+    const authService = {
+      startRegistrationLiveness: jest.fn().mockResolvedValue({
+        livenessSessionId: "live_1",
+        status: "pending",
+        url: "https://verify.example.com/live_1"
+      }),
+      completeRegistrationLiveness: jest.fn().mockResolvedValue({
+        kycStatus: "verified",
+        faceMatch: true,
+        livenessStatus: "passed"
+      }),
+      getRegistrationLivenessStatus: jest.fn().mockResolvedValue({
+        livenessSessionId: "live_1",
+        status: "passed",
+        usableForFaceMatch: true
+      })
+    };
+    const controller = new KycController({} as never, authService as never, {} as never);
+    const base = { registrationToken: "reg_temp_123", kycReference: "kyc_ref_123" };
+
+    await expect(controller.startLiveness(base)).resolves.toMatchObject({
+      success: true,
+      data: { livenessSessionId: "live_1", status: "pending" }
+    });
+    await expect(controller.completeLiveness({
+      ...base,
+      livenessSessionId: "live_1",
+      profileImageBase64: "data:image/jpeg;base64,aGVsbG8="
+    })).resolves.toMatchObject({
+      success: true,
+      data: { faceMatch: true, livenessStatus: "passed" }
+    });
+    await expect(controller.livenessStatus({
+      ...base,
+      livenessSessionId: "live_1"
+    })).resolves.toMatchObject({
+      success: true,
+      data: { status: "passed", usableForFaceMatch: true }
+    });
+    expect(authService.completeRegistrationLiveness).toHaveBeenCalledWith(
+      "reg_temp_123",
+      "kyc_ref_123",
+      "live_1",
+      "data:image/jpeg;base64,aGVsbG8="
+    );
   });
 });

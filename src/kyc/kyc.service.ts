@@ -178,6 +178,9 @@ export class KycService {
       kycStatus: result.faceMatch ? "verified" : "rejected",
       faceMatch: result.faceMatch,
       confidenceScore: result.confidenceScore,
+      faceMatchStatus: result.faceMatchStatus,
+      faceMatchReason: result.faceMatchReason,
+      livenessStatus: result.livenessStatus,
       profileImageUrl
     };
   }

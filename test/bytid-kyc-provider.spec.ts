@@ -130,6 +130,8 @@ describe("BytID KYC provider", () => {
       faceMatch: true,
       selfieVerified: true,
       confidenceScore: 92,
+      faceMatchStatus: "matched",
+      livenessStatus: "not_checked",
       firstName: "ADAEZE",
       lastName: "OKAFOR",
       dateOfBirth: "1990-01-15"
@@ -172,7 +174,40 @@ describe("BytID KYC provider", () => {
     ).resolves.toMatchObject({
       faceMatch: false,
       selfieVerified: false,
-      confidenceScore: 92
+      confidenceScore: 92,
+      faceMatchStatus: "matched",
+      faceMatchReason: "The face match confidence (92) was below the required threshold (95). Try again in better lighting without glasses or a face covering."
+    });
+  });
+
+  it("preserves an unavailable face-match reason for the client", async () => {
+    const service = new BytidKycProvider(config({ BYTID_API_KEY: "uvk_live_123" }));
+    jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+      success: true,
+      data: {
+        id: "verify_3",
+        status: "verified",
+        face_match: {
+          status: "unavailable",
+          score: 0,
+          reason: "No usable face was found in the selfie.",
+          liveness: "not_checked"
+        },
+        data: {
+          first_name: "ADAEZE",
+          last_name: "OKAFOR",
+          date_of_birth: "15-Jan-1990"
+        }
+      }
+    });
+
+    await expect(
+      service.verifyBvnWithSelfie("12345678901", "aGVsbG8=", "user_1", { reference: "kyc_ref_3" })
+    ).resolves.toMatchObject({
+      faceMatch: false,
+      faceMatchStatus: "unavailable",
+      faceMatchReason: "No usable face was found in the selfie.",
+      livenessStatus: "not_checked"
     });
   });
 
@@ -208,6 +243,77 @@ describe("BytID KYC provider", () => {
         requestId: "req_scope_1",
         providerDetails: { required_scope: "identity:bvn_face_match" }
       }
+    });
+  });
+
+  it("creates and retrieves liveness before submitting its session to BVN face match", async () => {
+    const service = new BytidKycProvider(config({ BYTID_API_KEY: "uvk_live_123" }));
+    const request = jest.spyOn((service as never) as { request: jest.Mock }, "request");
+    request
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          id: "live_1",
+          reference: "kyc_1:live:abc",
+          status: "pending",
+          url: "https://verify.example.com/liveness/live_1",
+          reasons: [],
+          usable_for_face_match: false,
+          expires_at: "2026-10-15T12:00:00.000Z"
+        }
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          id: "live_1",
+          reference: "kyc_1:live:abc",
+          status: "passed",
+          score: 96,
+          reasons: [],
+          usable_for_face_match: true
+        }
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          id: "verify_live_1",
+          status: "verified",
+          face_match: { status: "matched", score: 94, liveness: "passed" },
+          data: {
+            first_name: "ADAEZE",
+            last_name: "OKAFOR",
+            date_of_birth: "15-Jan-1990"
+          }
+        }
+      });
+
+    await expect(
+      service.createLivenessSession("https://api.example.com/return", { reference: "kyc_1:live:abc" })
+    ).resolves.toMatchObject({ id: "live_1", status: "pending", usableForFaceMatch: false });
+    await expect(service.getLivenessSession("live_1")).resolves.toMatchObject({
+      id: "live_1",
+      status: "passed",
+      score: 96,
+      usableForFaceMatch: true
+    });
+    await expect(
+      service.verifyBvnWithLiveness("12345678901", "live_1", "registration:reg_1", {
+        reference: "kyc_1:selfie:abc"
+      })
+    ).resolves.toMatchObject({
+      faceMatch: true,
+      confidenceScore: 94,
+      livenessStatus: "passed"
+    });
+    expect(request).toHaveBeenNthCalledWith(1, "post", "/liveness/sessions", {
+      reference: "kyc_1:live:abc",
+      redirect_url: "https://api.example.com/return"
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "get", "/liveness/sessions/live_1");
+    expect(request).toHaveBeenNthCalledWith(3, "post", "/identity/bvn/face-match", {
+      id_number: "12345678901",
+      reference: "kyc_1:selfie:abc",
+      liveness_session_id: "live_1"
     });
   });
 });

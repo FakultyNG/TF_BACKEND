@@ -99,6 +99,11 @@ describe("CashDropService", () => {
     expect(service.getSelfieCountdownSeconds()).toBe(10);
   });
 
+  it("switches registration selfie mode through environment configuration", () => {
+    expect(createService({ config: { KYC_SELFIE_MODE: "static" } }).service.getKycSelfieMode()).toBe("static");
+    expect(createService({ config: { KYC_SELFIE_MODE: "bytid_liveness" } }).service.getKycSelfieMode()).toBe("bytid_liveness");
+  });
+
   it("resolves a confident image match to receiver payment details", async () => {
     const { service } = createService({
       profiles: [{

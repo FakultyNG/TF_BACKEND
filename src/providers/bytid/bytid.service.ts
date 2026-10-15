@@ -3,7 +3,13 @@ import { ConfigService } from "@nestjs/config";
 import axios, { AxiosError, AxiosInstance } from "axios";
 import { ApiException } from "../../common/errors/api.exception";
 import { sha256 } from "../../common/utils/hash.util";
-import { BvnVerificationResult, KycProvider, KycVerificationContext, SelfieValidationResult } from "../interfaces/kyc-provider.interface";
+import {
+  BvnVerificationResult,
+  KycProvider,
+  KycVerificationContext,
+  LivenessSessionResult,
+  SelfieValidationResult
+} from "../interfaces/kyc-provider.interface";
 
 type JsonObject = Record<string, unknown>;
 
@@ -36,19 +42,78 @@ export class BytidKycProvider implements KycProvider {
       ...this.identityPayload(bvn, context),
       selfie_image: selfieImageBase64
     });
+    return this.mapFaceMatchResult(raw, bvn);
+  }
+
+  async createLivenessSession(redirectUrl: string, context?: KycVerificationContext): Promise<LivenessSessionResult> {
+    const raw = await this.post(this.config.get<string>("BYTID_LIVENESS_PATH", "/liveness/sessions"), {
+      reference: context?.reference,
+      redirect_url: redirectUrl
+    });
+    return this.mapLivenessResult(raw, true);
+  }
+
+  async getLivenessSession(sessionId: string): Promise<LivenessSessionResult> {
+    const raw = await this.get(`${this.config.get<string>("BYTID_LIVENESS_PATH", "/liveness/sessions")}/${encodeURIComponent(sessionId)}`);
+    return this.mapLivenessResult(raw, false);
+  }
+
+  async verifyBvnWithLiveness(bvn: string, livenessSessionId: string, _userId?: string, context?: KycVerificationContext): Promise<SelfieValidationResult> {
+    const raw = await this.post(this.config.get<string>("BYTID_BVN_FACE_MATCH_PATH", "/identity/bvn/face-match"), {
+      ...this.identityPayload(bvn, context),
+      liveness_session_id: livenessSessionId
+    });
+    return this.mapFaceMatchResult(raw, bvn);
+  }
+
+  private mapFaceMatchResult(raw: unknown, bvn: string): SelfieValidationResult {
     const base = this.mapBvnResult(raw, bvn);
     const data = objectOrEmpty(objectOrEmpty(raw).data);
     const faceMatch = objectOrEmpty(data.face_match);
     const score = firstNumber(faceMatch.score) ?? 0;
     const status = firstString(faceMatch.status)?.toLowerCase();
-    const matched = base.bvnVerified && status === "matched" && score >= this.faceMatchThreshold();
+    const livenessStatus = firstString(faceMatch.liveness)?.toLowerCase();
+    const threshold = this.faceMatchThreshold();
+    const matched = base.bvnVerified && status === "matched" && score >= threshold;
+    const faceMatchReason = matched
+      ? undefined
+      : publicFaceMatchReason(status, firstString(faceMatch.reason), score, threshold);
     return {
       ...base,
       provider: "bytid",
       faceMatch: matched,
       selfieVerified: matched,
       confidenceScore: score,
+      faceMatchStatus: status,
+      faceMatchReason,
+      livenessStatus,
       profileImageUrl: base.imageUrl,
+      rawProviderResponse: sanitize(raw)
+    };
+  }
+
+  private mapLivenessResult(raw: unknown, requireUrl: boolean): LivenessSessionResult {
+    const envelope = objectOrEmpty(raw);
+    if (envelope.success === false) this.throwEnvelopeError(envelope, "BytID liveness request failed");
+    const data = objectOrEmpty(envelope.data);
+    const id = firstString(data.id);
+    const status = firstString(data.status)?.toLowerCase();
+    const url = firstString(data.url);
+    if (!id || !status || (requireUrl && !url)) {
+      throw new ApiException("BytID liveness response is incomplete", "BYTID_LIVENESS_RESPONSE_INCOMPLETE", HttpStatus.BAD_GATEWAY, {
+        requestId: firstString(envelope.request_id)
+      });
+    }
+    return {
+      provider: "bytid",
+      id,
+      reference: firstString(data.reference),
+      status,
+      url,
+      score: firstNumber(data.score),
+      reasons: stringArray(data.reasons),
+      usableForFaceMatch: data.usable_for_face_match === true,
+      expiresAt: firstString(data.expires_at),
       rawProviderResponse: sanitize(raw)
     };
   }
@@ -71,17 +136,7 @@ export class BytidKycProvider implements KycProvider {
   private mapBvnResult(raw: unknown, bvn: string): BvnVerificationResult {
     const envelope = objectOrEmpty(raw);
     if (envelope.success === false) {
-      const providerError = objectOrEmpty(envelope.error);
-      throw new ApiException(
-        firstString(providerError.message) || "BytID verification failed",
-        "BYTID_VERIFICATION_FAILED",
-        providerHttpStatus(firstString(providerError.code)),
-        stripUndefined({
-          providerCode: firstString(providerError.code),
-          requestId: firstString(envelope.request_id),
-          providerDetails: sanitize(providerError.details)
-        })
-      );
+      this.throwEnvelopeError(envelope, "BytID verification failed");
     }
     const verification = objectOrEmpty(envelope.data);
     const person = objectOrEmpty(verification.data);
@@ -124,6 +179,20 @@ export class BytidKycProvider implements KycProvider {
     return result;
   }
 
+  private throwEnvelopeError(envelope: JsonObject, fallbackMessage: string): never {
+    const providerError = objectOrEmpty(envelope.error);
+    throw new ApiException(
+      firstString(providerError.message) || fallbackMessage,
+      "BYTID_VERIFICATION_FAILED",
+      providerHttpStatus(firstString(providerError.code)),
+      stripUndefined({
+        providerCode: firstString(providerError.code),
+        requestId: firstString(envelope.request_id),
+        providerDetails: sanitize(providerError.details)
+      })
+    );
+  }
+
   private async get(path: string) {
     return this.request("get", path);
   }
@@ -161,6 +230,19 @@ export class BytidKycProvider implements KycProvider {
   private faceMatchThreshold() {
     return Number(this.config.get<string>("BYTID_FACE_MATCH_THRESHOLD", "80"));
   }
+}
+
+function publicFaceMatchReason(status: string | undefined, providerReason: string | undefined, score: number, threshold: number) {
+  if (status === "unavailable") {
+    return providerReason || "The face match could not run because the BVN photo or selfie face was unavailable.";
+  }
+  if (status === "not_matched") {
+    return "The selfie did not match the photograph held against this BVN. Use bright, even lighting and keep your full face inside the frame.";
+  }
+  if (status === "matched" && score < threshold) {
+    return `The face match confidence (${score}) was below the required threshold (${threshold}). Try again in better lighting without glasses or a face covering.`;
+  }
+  return providerReason || "BytID could not produce a successful face match from this selfie.";
 }
 
 function normalizeBytidBaseUrl(value: string) {
@@ -215,6 +297,11 @@ function firstNumber(...values: unknown[]) {
     if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
   }
   return undefined;
+}
+
+function stringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => firstString(item)).filter((item): item is string => Boolean(item));
 }
 
 function stripUndefined(value: Record<string, unknown>) {

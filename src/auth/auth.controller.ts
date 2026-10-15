@@ -9,6 +9,11 @@ import { LoginDto } from "./dto/login.dto";
 import { RefreshTokenDto } from "./dto/refresh-token.dto";
 import { RegisterKycBvnDto } from "./dto/register-kyc-bvn.dto";
 import { RegisterKycSelfieDto } from "./dto/register-kyc-selfie.dto";
+import {
+  CompleteRegisterKycLivenessDto,
+  RegisterKycLivenessDto,
+  RegisterKycLivenessStatusDto
+} from "./dto/register-kyc-liveness.dto";
 import { StartRegistrationDto } from "./dto/start-registration.dto";
 import { JwtAuthGuard } from "./guards/jwt-auth.guard";
 
@@ -44,6 +49,36 @@ export class AuthController {
   async validateRegistrationSelfie(@Body() dto: RegisterKycSelfieDto) {
     const data = await this.authService.validateRegistrationSelfie(dto.registrationToken, dto.kycReference, dto.selfieImageBase64);
     return success("Selfie validation successful", data);
+  }
+
+  @Post("register/kyc/liveness/start")
+  @ApiExcludeEndpoint()
+  async startRegistrationLiveness(@Body() dto: RegisterKycLivenessDto) {
+    const data = await this.authService.startRegistrationLiveness(dto.registrationToken, dto.kycReference);
+    return success("Liveness session started successfully", data);
+  }
+
+  @Post("register/kyc/liveness/complete")
+  @ApiExcludeEndpoint()
+  async completeRegistrationLiveness(@Body() dto: CompleteRegisterKycLivenessDto) {
+    const data = await this.authService.completeRegistrationLiveness(
+      dto.registrationToken,
+      dto.kycReference,
+      dto.livenessSessionId,
+      dto.profileImageBase64
+    );
+    return success("Liveness session checked successfully", data);
+  }
+
+  @Post("register/kyc/liveness/status")
+  @ApiExcludeEndpoint()
+  async registrationLivenessStatus(@Body() dto: RegisterKycLivenessStatusDto) {
+    const data = await this.authService.getRegistrationLivenessStatus(
+      dto.registrationToken,
+      dto.kycReference,
+      dto.livenessSessionId
+    );
+    return success("Liveness session status fetched successfully", data);
   }
 
   @Post("login")

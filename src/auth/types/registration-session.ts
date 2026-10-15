@@ -16,6 +16,11 @@ export interface RegistrationKycState {
   selfieImageUrl?: string;
   selfieUploadId?: string;
   selfieResult?: SelfieValidationResult;
+  livenessSessionId?: string;
+  livenessReference?: string;
+  livenessUrl?: string;
+  livenessStatus?: string;
+  livenessExpiresAt?: string;
 }
 
 export interface RegistrationSession {

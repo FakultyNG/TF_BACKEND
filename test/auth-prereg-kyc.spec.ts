@@ -76,7 +76,8 @@ describe("pre-registration KYC onboarding", () => {
           JWT_ACCESS_SECRET: "access_secret",
           JWT_REFRESH_SECRET: "refresh_secret",
           JWT_ACCESS_TTL: "15m",
-          JWT_REFRESH_TTL_DAYS: "30"
+          JWT_REFRESH_TTL_DAYS: "30",
+          BYTID_LIVENESS_REDIRECT_URL: "https://api.example.com/api/v1/kyc/bvn/liveness/return"
         };
         return values[key] ?? fallback;
       })
@@ -106,6 +107,27 @@ describe("pre-registration KYC onboarding", () => {
         confidenceScore: 98.5,
         profileImageUrl: "https://provider.example/selfie.jpg",
         rawProviderResponse: { status: true }
+      }),
+      createLivenessSession: jest.fn(),
+      getLivenessSession: jest.fn().mockResolvedValue({
+        provider: "bytid",
+        id: "live_1",
+        status: "passed",
+        score: 96,
+        reasons: [],
+        usableForFaceMatch: true
+      }),
+      verifyBvnWithLiveness: jest.fn().mockResolvedValue({
+        provider: "bytid",
+        providerReference: "mock_ref_live",
+        bvnMasked: "*******8901",
+        bvnVerified: true,
+        faceMatch: true,
+        selfieVerified: true,
+        confidenceScore: 96,
+        faceMatchStatus: "matched",
+        livenessStatus: "passed",
+        rawProviderResponse: { status: true }
       })
     };
     const cloudinary = {
@@ -120,6 +142,7 @@ describe("pre-registration KYC onboarding", () => {
     };
     const cashDrop = {
       isEnabled: jest.fn().mockReturnValue(true),
+      getKycSelfieMode: jest.fn().mockReturnValue("bytid_liveness"),
       register: jest.fn().mockResolvedValue({ CashDropId: "cashdrop_1" })
     };
     const otp = {
@@ -251,6 +274,67 @@ describe("pre-registration KYC onboarding", () => {
     const secondReference = selfieKycProvider.verifyBvnWithSelfie.mock.calls[1][3].reference;
     expect(secondReference).toMatch(new RegExp(`^${bvn.kycReference}:selfie:[a-f0-9]{10}$`));
     expect(secondReference).not.toBe(firstReference);
+  });
+
+  it("creates a BytID liveness session and face-matches only after it passes", async () => {
+    const { service, selfieKycProvider, cloudinary, redisStore } = makeService();
+    const bvn = await service.verifyRegistrationBvn(registrationToken, "12345678901");
+    selfieKycProvider.createLivenessSession.mockImplementationOnce(async (_redirect: string, context: { reference: string }) => ({
+      provider: "bytid",
+      id: "live_1",
+      reference: context.reference,
+      status: "pending",
+      url: "https://verify.example.com/liveness/live_1",
+      reasons: [],
+      usableForFaceMatch: false,
+      expiresAt: "2026-06-02T00:30:00.000Z"
+    }));
+
+    const started = await service.startRegistrationLiveness(registrationToken, bvn.kycReference);
+    expect(started).toMatchObject({ livenessSessionId: "live_1", status: "pending" });
+    expect(selfieKycProvider.createLivenessSession).toHaveBeenCalledWith(
+      "https://api.example.com/api/v1/kyc/bvn/liveness/return",
+      { reference: expect.stringMatching(new RegExp(`^${bvn.kycReference}:live:[a-f0-9]{10}$`)) }
+    );
+
+    await expect(
+      service.getRegistrationLivenessStatus(registrationToken, bvn.kycReference, "live_1")
+    ).resolves.toMatchObject({
+      livenessSessionId: "live_1",
+      status: "passed",
+      score: 96,
+      usableForFaceMatch: true
+    });
+
+    await expect(
+      service.completeRegistrationLiveness(
+        registrationToken,
+        bvn.kycReference,
+        "live_1",
+        "data:image/jpeg;base64,aGVsbG8="
+      )
+    ).resolves.toMatchObject({
+      kycStatus: "verified",
+      faceMatch: true,
+      confidenceScore: 96,
+      livenessStatus: "passed",
+      profileImageUrl: "https://res.cloudinary.com/tf/selfie.jpg"
+    });
+    expect(selfieKycProvider.verifyBvnWithLiveness).toHaveBeenCalledWith(
+      "12345678901",
+      "live_1",
+      `registration:${registrationToken}`,
+      expect.not.objectContaining({ includePhoto: true })
+    );
+    expect(cloudinary.uploadBase64Image).toHaveBeenCalledWith(
+      "data:image/jpeg;base64,aGVsbG8=",
+      "tf/users/kyc-selfies",
+      `${bvn.kycReference}-camera.jpg`
+    );
+    expect((redisStore.get(registrationKey) as { kyc: { bvn?: string; livenessStatus: string } }).kyc).toMatchObject({
+      bvn: undefined,
+      livenessStatus: "passed"
+    });
   });
 
   it("creates the user and attaches verified pre-registration KYC on registration complete", async () => {

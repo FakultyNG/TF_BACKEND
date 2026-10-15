@@ -9,7 +9,7 @@ import { ApiException } from "../common/errors/api.exception";
 import { sha256 } from "../common/utils/hash.util";
 import { normalizePhoneNumber } from "../common/utils/phone.util";
 import { PrismaService } from "../prisma/prisma.service";
-import { KycProvider } from "../providers/interfaces/kyc-provider.interface";
+import { KycProvider, SelfieValidationResult } from "../providers/interfaces/kyc-provider.interface";
 import { KYC_PROVIDER, SELFIE_KYC_PROVIDER } from "../providers/provider.tokens";
 import { RedisService } from "../redis/redis.service";
 import { OtpService } from "../otp/otp.service";
@@ -130,7 +130,198 @@ export class AuthService {
       kycStatus: result.faceMatch ? "verified" : "rejected",
       faceMatch: result.faceMatch,
       confidenceScore: result.confidenceScore,
+      faceMatchStatus: result.faceMatchStatus,
+      faceMatchReason: result.faceMatchReason,
+      livenessStatus: result.livenessStatus,
       profileImageUrl: result.faceMatch ? uploadedSelfie.secureUrl : result.profileImageUrl
+    };
+  }
+
+  async startRegistrationLiveness(registrationToken: string, kycReference: string) {
+    const { session, ttl } = await this.getRegistrationSession(registrationToken);
+    const current = this.requireRegistrationKyc(session, kycReference);
+    if (this.cashDropService.getKycSelfieMode() !== "bytid_liveness") {
+      throw new ApiException("BytID liveness is not enabled", "KYC_LIVENESS_NOT_ENABLED", HttpStatus.CONFLICT);
+    }
+    if (!this.selfieKycProvider.createLivenessSession) {
+      throw new ApiException("The configured selfie provider does not support liveness", "KYC_LIVENESS_UNSUPPORTED", HttpStatus.NOT_IMPLEMENTED);
+    }
+    if (
+      current.livenessStatus === "pending" &&
+      current.livenessSessionId &&
+      current.livenessUrl &&
+      (!current.livenessExpiresAt || new Date(current.livenessExpiresAt).getTime() > Date.now())
+    ) {
+      return {
+        livenessSessionId: current.livenessSessionId,
+        status: current.livenessStatus,
+        url: current.livenessUrl,
+        expiresAt: current.livenessExpiresAt
+      };
+    }
+
+    const reference = livenessProviderReference(kycReference);
+    const result = await this.selfieKycProvider.createLivenessSession(this.livenessRedirectUrl(), { reference });
+    if (result.reference && result.reference !== reference) {
+      throw new ApiException("BytID returned a mismatched liveness reference", "BYTID_LIVENESS_REFERENCE_MISMATCH", HttpStatus.BAD_GATEWAY);
+    }
+    const kyc: RegistrationKycState = {
+      ...current,
+      livenessSessionId: result.id,
+      livenessReference: reference,
+      livenessUrl: result.url,
+      livenessStatus: result.status,
+      livenessExpiresAt: result.expiresAt
+    };
+    await this.redis.setJson(`registration:${registrationToken}`, { ...session, kyc }, ttl);
+    return {
+      livenessSessionId: result.id,
+      status: result.status,
+      url: result.url,
+      expiresAt: result.expiresAt
+    };
+  }
+
+  async completeRegistrationLiveness(
+    registrationToken: string,
+    kycReference: string,
+    livenessSessionId: string,
+    profileImageBase64: string
+  ) {
+    const { session, ttl } = await this.getRegistrationSession(registrationToken);
+    const current = this.requireRegistrationKyc(session, kycReference);
+    if (current.livenessSessionId !== livenessSessionId) {
+      throw new ApiException("Liveness session does not belong to this registration", "KYC_LIVENESS_SESSION_MISMATCH", HttpStatus.BAD_REQUEST);
+    }
+    if (current.faceMatch && current.selfieResult?.livenessStatus === "passed") {
+      return this.registrationSelfieResponse(current.selfieResult, current.selfieImageUrl);
+    }
+    if (!current.bvn) {
+      throw new ApiException("Registration KYC BVN verification session expired", "REGISTRATION_KYC_BVN_SESSION_EXPIRED", HttpStatus.BAD_REQUEST);
+    }
+    if (!this.selfieKycProvider.getLivenessSession || !this.selfieKycProvider.verifyBvnWithLiveness) {
+      throw new ApiException("The configured selfie provider does not support liveness", "KYC_LIVENESS_UNSUPPORTED", HttpStatus.NOT_IMPLEMENTED);
+    }
+
+    const liveness = await this.selfieKycProvider.getLivenessSession(livenessSessionId);
+    if (liveness.reference && current.livenessReference && liveness.reference !== current.livenessReference) {
+      throw new ApiException("BytID returned a mismatched liveness reference", "BYTID_LIVENESS_REFERENCE_MISMATCH", HttpStatus.BAD_GATEWAY);
+    }
+    if (liveness.status === "pending") {
+      await this.redis.setJson(
+        `registration:${registrationToken}`,
+        { ...session, kyc: { ...current, livenessStatus: "pending" } },
+        ttl
+      );
+      return {
+        kycStatus: "pending",
+        faceMatch: false,
+        confidenceScore: 0,
+        faceMatchStatus: "pending",
+        faceMatchReason: "Complete the BytID live face check to continue.",
+        livenessStatus: "pending"
+      };
+    }
+    if (liveness.status !== "passed" || !liveness.usableForFaceMatch) {
+      const reason = liveness.reasons.length
+        ? `The live face check failed: ${liveness.reasons.join(", ").replace(/_/g, " ")}.`
+        : `The live face check ${liveness.status}. Please try again.`;
+      await this.redis.setJson(
+        `registration:${registrationToken}`,
+        { ...session, kyc: { ...current, status: KycStatus.rejected, livenessStatus: liveness.status, livenessUrl: undefined } },
+        ttl
+      );
+      return {
+        kycStatus: "rejected",
+        faceMatch: false,
+        confidenceScore: liveness.score ?? 0,
+        faceMatchStatus: "unavailable",
+        faceMatchReason: reason,
+        livenessStatus: liveness.status
+      };
+    }
+
+    const storedPhoto = await this.cloudinaryService.uploadBase64Image(
+      profileImageBase64,
+      "tf/users/kyc-selfies",
+      `${kycReference}-camera.jpg`
+    );
+    const bvnProfile = current.providerResult;
+    const result = await this.selfieKycProvider.verifyBvnWithLiveness(
+      current.bvn,
+      livenessSessionId,
+      `registration:${registrationToken}`,
+      {
+        phoneNumber: session.phoneNumber,
+        firstName: bvnProfile.firstName,
+        middleName: bvnProfile.middleName,
+        lastName: bvnProfile.lastName,
+        dateOfBirth: bvnProfile.dateOfBirth,
+        reference: selfieProviderReference(kycReference)
+      }
+    );
+    const safeResult: SelfieValidationResult = {
+      ...result,
+      imageUrl: isHttpUrl(result.imageUrl) ? result.imageUrl : undefined,
+      profileImageUrl: result.faceMatch ? storedPhoto.secureUrl : result.profileImageUrl
+    };
+    const kyc: RegistrationKycState = {
+      ...current,
+      bvn: result.faceMatch ? undefined : current.bvn,
+      providerReference: result.providerReference ?? current.providerReference,
+      bvnMasked: result.bvnMasked ?? current.bvnMasked,
+      providerResult: { ...current.providerResult, ...safeResult },
+      selfieVerified: result.selfieVerified,
+      faceMatch: result.faceMatch,
+      confidenceScore: result.confidenceScore,
+      status: result.faceMatch ? KycStatus.verified : KycStatus.rejected,
+      selfieImageUrl: result.faceMatch ? storedPhoto.secureUrl : safeResult.profileImageUrl,
+      selfieUploadId: result.faceMatch ? storedPhoto.uploadId : undefined,
+      selfieResult: safeResult,
+      livenessStatus: result.livenessStatus ?? liveness.status,
+      livenessUrl: undefined
+    };
+    await this.redis.setJson(`registration:${registrationToken}`, { ...session, kyc }, ttl);
+    return this.registrationSelfieResponse(safeResult, kyc.selfieImageUrl);
+  }
+
+  async getRegistrationLivenessStatus(
+    registrationToken: string,
+    kycReference: string,
+    livenessSessionId: string
+  ) {
+    const { session, ttl } = await this.getRegistrationSession(registrationToken);
+    const current = this.requireRegistrationKyc(session, kycReference);
+    if (current.livenessSessionId !== livenessSessionId) {
+      throw new ApiException("Liveness session does not belong to this registration", "KYC_LIVENESS_SESSION_MISMATCH", HttpStatus.BAD_REQUEST);
+    }
+    if (!this.selfieKycProvider.getLivenessSession) {
+      throw new ApiException("The configured selfie provider does not support liveness", "KYC_LIVENESS_UNSUPPORTED", HttpStatus.NOT_IMPLEMENTED);
+    }
+    const result = await this.selfieKycProvider.getLivenessSession(livenessSessionId);
+    if (result.reference && current.livenessReference && result.reference !== current.livenessReference) {
+      throw new ApiException("BytID returned a mismatched liveness reference", "BYTID_LIVENESS_REFERENCE_MISMATCH", HttpStatus.BAD_GATEWAY);
+    }
+    await this.redis.setJson(
+      `registration:${registrationToken}`,
+      {
+        ...session,
+        kyc: {
+          ...current,
+          status: ["failed", "expired"].includes(result.status) ? KycStatus.rejected : current.status,
+          livenessStatus: result.status,
+          livenessUrl: result.status === "pending" ? current.livenessUrl : undefined
+        }
+      },
+      ttl
+    );
+    return {
+      livenessSessionId: result.id,
+      status: result.status,
+      score: result.score,
+      reasons: result.reasons,
+      usableForFaceMatch: result.usableForFaceMatch,
+      expiresAt: result.expiresAt
     };
   }
 
@@ -323,6 +514,33 @@ export class AuthService {
     return ["1", "true", "yes", "on"].includes(this.config.get<string>("KYC_SELFIE_REQUIRED", "true").toLowerCase());
   }
 
+  private requireRegistrationKyc(session: RegistrationSession, kycReference: string) {
+    if (!session.kyc || session.kyc.kycReference !== kycReference || !session.kyc.bvnVerified) {
+      throw new ApiException("Registration KYC BVN verification required", "REGISTRATION_KYC_BVN_REQUIRED", HttpStatus.BAD_REQUEST);
+    }
+    return session.kyc;
+  }
+
+  private livenessRedirectUrl() {
+    const value = this.config.get<string>("BYTID_LIVENESS_REDIRECT_URL", "").trim();
+    if (!/^https:\/\//i.test(value)) {
+      throw new ApiException("BytID liveness redirect URL is not configured", "BYTID_LIVENESS_REDIRECT_URL_MISSING", HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+    return value;
+  }
+
+  private registrationSelfieResponse(result: SelfieValidationResult, profileImageUrl?: string) {
+    return {
+      kycStatus: result.faceMatch ? "verified" : "rejected",
+      faceMatch: result.faceMatch,
+      confidenceScore: result.confidenceScore,
+      faceMatchStatus: result.faceMatchStatus,
+      faceMatchReason: result.faceMatchReason,
+      livenessStatus: result.livenessStatus,
+      profileImageUrl: result.faceMatch ? profileImageUrl ?? result.profileImageUrl : result.profileImageUrl
+    };
+  }
+
   private isRegistrationKycComplete(status: KycStatus) {
     return status === KycStatus.verified || (!this.isSelfieKycRequired() && status === KycStatus.bvn_verified);
   }
@@ -481,6 +699,14 @@ export class AuthService {
 
 function selfieProviderReference(kycReference: string) {
   return `${kycReference}:selfie:${uuid().replace(/-/g, "").slice(0, 10)}`;
+}
+
+function livenessProviderReference(kycReference: string) {
+  return `${kycReference}:live:${uuid().replace(/-/g, "").slice(0, 10)}`;
+}
+
+function isHttpUrl(value?: string) {
+  return Boolean(value && /^https?:\/\//i.test(value));
 }
 
 function parseProviderDate(value?: string) {

@@ -226,7 +226,16 @@ KYC_PROVIDER=bytid
 BYTID_BASE_URL=https://api.bytid.com/v1
 BYTID_API_KEY=<from BytID dashboard>
 BYTID_BVN_PATH=/identity/bvn
+BYTID_BVN_FACE_MATCH_PATH=/identity/bvn/face-match
+BYTID_LIVENESS_PATH=/liveness/sessions
+KYC_SELFIE_MODE=bytid_liveness
+BYTID_LIVENESS_REDIRECT_URL=https://api.your-domain.com/api/v1/kyc/bvn/liveness/return
+KYC_LIVENESS_APP_RETURN_URL=transfa://kyc/liveness-complete
 ```
+
+Set `KYC_SELFIE_MODE=static` to retain the direct camera-image face match. In
+`bytid_liveness` mode, the app camera image is reserved for the customer profile
+and CashDrop; BytID matches the passed liveness session to the BVN independently.
 
 Keep `KYC_PROVIDER=strowallet` (or omit it) to use the default Strowallet integration.
 
