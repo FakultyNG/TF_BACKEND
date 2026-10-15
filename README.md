@@ -230,6 +230,10 @@ BYTID_BVN_PATH=/identity/bvn
 
 Keep `KYC_PROVIDER=strowallet` (or omit it) to use the default Strowallet integration.
 
+The Strowallet integration uses the live BVN details lookup (`/api/kyc_getbvn/`) so the BVN screen can return the customer's name and date of birth before selfie verification. It does not use Strowallet's OTP-oriented BVN endpoint.
+
+The selfie endpoint reuses the exact BVN from the preceding lookup through the short-lived server-side `kycReference` session. The app sends only `registrationToken`, `kycReference`, and `selfieImageBase64`; the backend sends the stored BVN and selfie to BytID for face matching and then removes the plain BVN from the temporary session.
+
 The mobile endpoints do not change when the provider changes. TF backend calls the configured BVN and selfie providers, stores only hashed/masked BVN/NIN values in PostgreSQL, keeps the raw BVN only in Redis for the temporary KYC/session TTL needed between BVN and selfie validation, and stores sanitized provider responses in `ProviderLog`.
 
 3. Click `Authorize` in Swagger and paste only the access token value, without `Bearer`.

@@ -9,6 +9,38 @@ const config = (values: Record<string, string> = {}) => ({
 }) as unknown as ConfigService;
 
 describe("BytID KYC provider", () => {
+  it("normalizes the public website URL to the BytID API base URL", () => {
+    const service = new BytidKycProvider(config({
+      BYTID_BASE_URL: "https://www.bytid.com/",
+      BYTID_API_KEY: "uvk_test_123"
+    }));
+
+    expect(((service as never) as { http: { defaults: { baseURL: string } } }).http.defaults.baseURL)
+      .toBe("https://api.bytid.com/v1");
+  });
+
+  it("returns the provider error code and request id from BytID error envelopes", async () => {
+    const service = new BytidKycProvider(config({ BYTID_API_KEY: "uvk_test_123" }));
+    jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+      success: false,
+      error: {
+        code: "insufficient_scope",
+        message: "The API key cannot run identity checks.",
+        details: { required_scope: "identity" }
+      },
+      request_id: "req_123"
+    });
+
+    await expect(service.verifyBvn("12345678901")).rejects.toMatchObject({
+      code: "BYTID_VERIFICATION_FAILED",
+      details: {
+        providerCode: "insufficient_scope",
+        requestId: "req_123",
+        providerDetails: { required_scope: "identity" }
+      }
+    });
+  });
+
   it("submits a server-side BVN lookup to the documented endpoint", async () => {
     const service = new BytidKycProvider(config({ BYTID_API_KEY: "uvk_test_123" }));
     const request = jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
@@ -127,7 +159,11 @@ describe("BytID KYC provider", () => {
         id: "verify_2",
         status: "verified",
         face_match: { status: "matched", score: 92 },
-        data: {}
+        data: {
+          first_name: "ADAEZE",
+          last_name: "OKAFOR",
+          date_of_birth: "15-Jan-1990"
+        }
       }
     });
 

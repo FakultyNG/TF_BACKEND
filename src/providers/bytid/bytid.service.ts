@@ -14,7 +14,7 @@ export class BytidKycProvider implements KycProvider {
 
   constructor(private readonly config: ConfigService) {
     this.http = axios.create({
-      baseURL: this.config.get<string>("BYTID_BASE_URL", "https://api.bytid.com/v1"),
+      baseURL: normalizeBytidBaseUrl(this.config.get<string>("BYTID_BASE_URL", "https://api.bytid.com/v1")),
       timeout: Number(this.config.get<string>("BYTID_TIMEOUT_MS", "15000")),
       headers: {
         accept: "application/json",
@@ -71,15 +71,35 @@ export class BytidKycProvider implements KycProvider {
   private mapBvnResult(raw: unknown, bvn: string): BvnVerificationResult {
     const envelope = objectOrEmpty(raw);
     if (envelope.success === false) {
-      throw new ApiException("BytID verification failed", "BYTID_VERIFICATION_FAILED", HttpStatus.BAD_GATEWAY);
+      const providerError = objectOrEmpty(envelope.error);
+      throw new ApiException(
+        firstString(providerError.message) || "BytID verification failed",
+        "BYTID_VERIFICATION_FAILED",
+        providerHttpStatus(firstString(providerError.code)),
+        stripUndefined({
+          providerCode: firstString(providerError.code),
+          requestId: firstString(envelope.request_id),
+          providerDetails: sanitize(providerError.details)
+        })
+      );
     }
     const verification = objectOrEmpty(envelope.data);
     const person = objectOrEmpty(verification.data);
     const status = firstString(verification.status)?.toLowerCase();
+    if (status === "not_found") {
+      throw new ApiException("BVN was not found", "BYTID_BVN_NOT_FOUND", HttpStatus.UNPROCESSABLE_ENTITY, {
+        requestId: firstString(envelope.request_id)
+      });
+    }
+    if (status === "failed") {
+      throw new ApiException("BytID could not reach the BVN registry", "BYTID_REGISTRY_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE, {
+        requestId: firstString(envelope.request_id)
+      });
+    }
     const verified = envelope.success === true && status === "verified";
     const nin = firstString(person.nin, person.nin_number);
     const rawDob = firstString(person.date_of_birth, person.dateOfBirth, person.dob);
-    return {
+    const result = {
       provider: "bytid",
       providerReference: firstString(verification.id, verification.reference, envelope.request_id),
       bvnMasked: firstString(verification.id_number) || (bvn ? maskIdentifier(bvn) : undefined),
@@ -96,6 +116,12 @@ export class BytidKycProvider implements KycProvider {
       imageUrl: firstString(person.photo, person.image_url, person.imageUrl),
       rawProviderResponse: sanitize(raw)
     };
+    if (verified && (!result.firstName || !result.lastName || !result.dateOfBirth)) {
+      throw new ApiException("BytID BVN response is missing required identity fields", "BYTID_BVN_RESPONSE_INCOMPLETE", HttpStatus.BAD_GATEWAY, {
+        requestId: firstString(envelope.request_id)
+      });
+    }
+    return result;
   }
 
   private async get(path: string) {
@@ -125,13 +151,40 @@ export class BytidKycProvider implements KycProvider {
   }
 
   private apiKey() {
-    const key = this.config.get<string>("BYTID_API_KEY");
+    const key = this.config.get<string>("BYTID_API_KEY")?.trim();
     if (!key) throw new ApiException("BytID API key is not configured", "BYTID_CONFIG_MISSING", HttpStatus.INTERNAL_SERVER_ERROR);
     return key;
   }
 
   private faceMatchThreshold() {
     return Number(this.config.get<string>("BYTID_FACE_MATCH_THRESHOLD", "80"));
+  }
+}
+
+function normalizeBytidBaseUrl(value: string) {
+  const trimmed = value.trim().replace(/\/+$/g, "");
+  if (/^https?:\/\/(www\.)?bytid\.com$/i.test(trimmed)) return "https://api.bytid.com/v1";
+  if (/^https?:\/\/api\.bytid\.com$/i.test(trimmed)) return `${trimmed}/v1`;
+  return trimmed;
+}
+
+function providerHttpStatus(code?: string) {
+  switch (code) {
+    case "invalid_api_key":
+      return HttpStatus.UNAUTHORIZED;
+    case "insufficient_balance":
+      return HttpStatus.PAYMENT_REQUIRED;
+    case "live_not_enabled":
+    case "ip_not_allowed":
+    case "insufficient_scope":
+    case "business_suspended":
+      return HttpStatus.FORBIDDEN;
+    case "rate_limited":
+      return HttpStatus.TOO_MANY_REQUESTS;
+    case "check_unavailable":
+      return HttpStatus.SERVICE_UNAVAILABLE;
+    default:
+      return HttpStatus.BAD_GATEWAY;
   }
 }
 

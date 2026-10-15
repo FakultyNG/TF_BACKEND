@@ -164,49 +164,57 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
   }
 
   async verifyBvn(bvn: string, userId?: string, context?: KycVerificationContext): Promise<BvnVerificationResult> {
-    const identity = await this.identity(userId, bvn, context);
-    const raw = await this.post(this.config.get<string>("STROWALLET_BVN_PATH", "/api/kyc_bvn/"), undefined, {
-      public_key: this.publicKey(),
-      number: bvn,
-      firstName: identity.firstName,
-      lastName: identity.lastName,
-      dateOfBirth: identity.dateOfBirth,
-      phoneNumber: identity.phoneNumber,
-      mode: this.mode()
+    void userId;
+    void context;
+    const raw = await this.get(
+      this.config.get<string>("STROWALLET_BVN_DETAILS_PATH", "/api/kyc_getbvn/"),
+      { number: bvn }
+    );
+    const body = unwrapBvnDetails(raw);
+    const message = firstString(body.message, objectOrEmpty(raw).message);
+    if (!truthySuccess(raw) || failureStatus(firstString(body.status, body.verification_status, message))) {
+      throw new ApiException(
+        message || "Strowallet could not verify this BVN",
+        "STROWALLET_BVN_LOOKUP_FAILED",
+        HttpStatus.BAD_GATEWAY
+      );
+    }
+    const identity = this.requireIdentity({
+      firstName: firstString(body.firstName, body.first_name, body.firstname),
+      lastName: firstString(body.lastName, body.last_name, body.lastname, body.surname),
+      dateOfBirth: firstString(body.dateOfBirth, body.date_of_birth, body.dob, body.birthDate, body.birth_date),
+      phoneNumber: firstString(body.phoneNumber, body.phone_number, body.phoneNumber1, body.phone_number1, body.phone, body.mobile)
     });
-    const body = unwrap(raw);
-    const verified = truthySuccess(raw) && !failureStatus(firstString(body.status, body.verification_status, body.message));
     const nin = firstString(body.nin, body.ninNumber, body.nin_number);
     return {
       provider: "strowallet",
       providerReference: firstString(body.reference, body.verification_reference, body.sessionId, body.id),
       bvnMasked: maskIdentifier(bvn),
-      bvnVerified: verified,
-      firstName: firstString(body.firstName, body.first_name) || identity.firstName,
+      bvnVerified: true,
+      firstName: identity.firstName,
       middleName: firstString(body.middleName, body.middle_name),
-      lastName: firstString(body.lastName, body.last_name) || identity.lastName,
+      lastName: identity.lastName,
       email: firstString(body.email),
-      phoneNumber: firstString(body.phoneNumber, body.phone_number) || identity.phoneNumber,
-      dateOfBirth: firstString(body.dateOfBirth, body.date_of_birth, body.dob) || identity.dateOfBirth,
+      phoneNumber: identity.phoneNumber,
+      dateOfBirth: identity.dateOfBirth,
       gender: firstString(body.gender),
       country: firstString(body.country, body.nationality),
       ninMasked: nin ? maskIdentifier(nin) : undefined,
       ninHash: nin ? sha256(nin) : undefined,
-      imageUrl: firstString(body.imageUrl, body.image_url, body.photo),
+      imageUrl: firstString(body.imageUrl, body.image_url),
       rawProviderResponse: sanitize(raw)
     };
   }
 
   async verifyBvnWithSelfie(bvn: string, _selfieImageBase64: string, userId?: string, context?: KycVerificationContext): Promise<SelfieValidationResult> {
-    const result = await this.verifyBvn(bvn, userId, context);
-    return {
-      ...result,
-      faceMatch: result.bvnVerified,
-      selfieVerified: result.bvnVerified,
-      confidenceScore: result.bvnVerified ? 100 : 0,
-      profileImageUrl: result.imageUrl,
-      rawProviderResponse: result.rawProviderResponse
-    };
+    void bvn;
+    void userId;
+    void context;
+    throw new ApiException(
+      "Strowallet does not provide selfie face matching; configure BytID or Prembly as SELFIE_KYC_PROVIDER",
+      "STROWALLET_SELFIE_NOT_SUPPORTED",
+      HttpStatus.NOT_IMPLEMENTED
+    );
   }
 
   async getVerificationStatus(providerReference: string): Promise<BvnVerificationResult> {
@@ -259,8 +267,8 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
       const diagnostics = providerDiagnostics(error);
       this.logger.warn({ provider: "strowallet", method, url, message, ...diagnostics });
       throw new ApiException(
-        url === this.config.get<string>("STROWALLET_BVN_PATH", "/api/kyc_bvn/")
-          ? "Strowallet BVN verification request failed"
+        url === this.config.get<string>("STROWALLET_BVN_DETAILS_PATH", "/api/kyc_getbvn/")
+          ? "Strowallet BVN details request failed"
           : "Strowallet provider request failed",
         "STROWALLET_PROVIDER_ERROR",
         HttpStatus.BAD_GATEWAY,
@@ -270,13 +278,13 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
   }
 
   private publicKey() {
-    const key = this.config.get<string>("STROWALLET_PUBLIC_KEY");
+    const key = this.config.get<string>("STROWALLET_PUBLIC_KEY")?.trim();
     if (!key) throw new ApiException("Strowallet public key is not configured", "STROWALLET_CONFIG_MISSING", HttpStatus.INTERNAL_SERVER_ERROR);
     return key;
   }
 
   private mode() {
-    return this.config.get<string>("STROWALLET_MODE", "sandbox");
+    return this.config.get<string>("STROWALLET_MODE", "sandbox").trim();
   }
 
   private virtualAccountWebhookUrl() {
@@ -292,67 +300,11 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
     return ["1", "true", "yes", "on"].includes(this.config.get<string>("STROWALLET_WEBHOOK_VERIFY_ENABLED", "true").toLowerCase());
   }
 
-  private async identity(userId?: string, bvn?: string, context?: KycVerificationContext) {
-    const fallbackPhone = this.config.get<string>("STROWALLET_KYC_DEFAULT_PHONE", "08100000000");
-    const fallbackFirstName = this.config.get<string>("STROWALLET_KYC_DEFAULT_FIRST_NAME", "JOHN");
-    const fallbackLastName = this.config.get<string>("STROWALLET_KYC_DEFAULT_LAST_NAME", "DOE");
-    const fallbackDob = this.config.get<string>("STROWALLET_KYC_DEFAULT_DOB", "01-01-1990");
-    if (!userId || userId.startsWith("registration:")) {
-      const bvnIdentity = await this.getBvnDetailsBestEffort(bvn);
-      const identity = {
-        firstName: firstString(bvnIdentity.firstName, fallbackFirstName)?.toUpperCase(),
-        lastName: firstString(bvnIdentity.lastName, fallbackLastName)?.toUpperCase(),
-        dateOfBirth: normalizeStrowalletDateString(firstString(bvnIdentity.dateOfBirth, fallbackDob)),
-        phoneNumber: toLocalPhone(firstString(context?.phoneNumber, bvnIdentity.phoneNumber, fallbackPhone) || fallbackPhone)
-      };
-      return this.requireIdentity(identity);
-    }
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { profile: true } });
-    const hasStoredIdentity = Boolean(user?.profile?.firstName && user.profile.lastName && user.profile.dateOfBirth);
-    const bvnIdentity = hasStoredIdentity ? {} : await this.getBvnDetailsBestEffort(bvn);
-    return this.requireIdentity({
-      firstName: firstString(user?.profile?.firstName, bvnIdentity.firstName, fallbackFirstName)?.toUpperCase(),
-      lastName: firstString(user?.profile?.lastName, bvnIdentity.lastName, fallbackLastName)?.toUpperCase(),
-      dateOfBirth: formatStrowalletDate(user?.profile?.dateOfBirth) || normalizeStrowalletDateString(firstString(bvnIdentity.dateOfBirth, fallbackDob)),
-      phoneNumber: toLocalPhone(firstString(context?.phoneNumber, user?.phoneNumber, bvnIdentity.phoneNumber, fallbackPhone) || fallbackPhone)
-    });
-  }
-
-  private async getBvnDetailsBestEffort(bvn?: string): Promise<StrowalletBvnIdentity> {
-    if (!bvn) return {};
-    try {
-      return await this.getBvnDetails(bvn);
-    } catch (error) {
-      this.logger.warn({
-        provider: "strowallet",
-        operation: "bvn_details_enrichment",
-        message: error instanceof Error ? error.message : "Strowallet BVN details enrichment failed",
-        fallback: "configured identity defaults"
-      });
-      return {};
-    }
-  }
-
-  private async getBvnDetails(bvn: string): Promise<StrowalletBvnIdentity> {
-    const raw = await this.get(this.config.get<string>("STROWALLET_BVN_DETAILS_ADVANCE_PATH", "/api/kyc_getbvnadvance/"), {
-      number: bvn
-    });
-    const body = unwrap(raw);
-    const fullName = firstString(body.fullName, body.full_name, body.name, body.nameOnBvn, body.name_on_bvn);
-    const split = splitFullName(fullName);
-    return {
-      firstName: firstString(body.firstName, body.first_name, body.firstname, split.firstName),
-      lastName: firstString(body.lastName, body.last_name, body.lastname, body.surname, split.lastName),
-      dateOfBirth: firstString(body.dateOfBirth, body.date_of_birth, body.dob, body.birthDate, body.birth_date),
-      phoneNumber: firstString(body.phoneNumber, body.phone_number, body.phone, body.mobile, body.mobileNumber)
-    };
-  }
-
   private requireIdentity(identity: { firstName?: string; lastName?: string; dateOfBirth?: string; phoneNumber?: string }) {
-    if (!identity.firstName || !identity.lastName || !identity.dateOfBirth || !identity.phoneNumber) {
+    if (!identity.firstName || !identity.lastName || !identity.dateOfBirth) {
       throw new ApiException("Strowallet BVN details response is missing required identity fields", "STROWALLET_BVN_DETAILS_INCOMPLETE", HttpStatus.BAD_GATEWAY);
     }
-    return identity as { firstName: string; lastName: string; dateOfBirth: string; phoneNumber: string };
+    return identity as { firstName: string; lastName: string; dateOfBirth: string; phoneNumber?: string };
   }
 }
 
@@ -362,6 +314,19 @@ function unwrap(value: unknown): JsonObject {
   const response = objectOrEmpty(body.response);
   const account = objectOrEmpty(data.account);
   return { ...body, ...data, ...response, ...account };
+}
+
+function unwrapBvnDetails(value: unknown): JsonObject {
+  const envelope = unwrap(value);
+  const raw = objectOrEmpty(value);
+  return {
+    ...envelope,
+    ...objectOrEmpty(raw.bvn_data),
+    ...objectOrEmpty(raw.bvnData),
+    ...objectOrEmpty(raw.details),
+    ...objectOrEmpty(objectOrEmpty(raw.data).bvn_data),
+    ...objectOrEmpty(objectOrEmpty(raw.data).details)
+  };
 }
 
 function objectOrEmpty(value: unknown): JsonObject {
@@ -466,7 +431,7 @@ function sanitize(value: unknown): unknown {
 
 function isSensitiveKey(key: string) {
   const lower = key.toLowerCase();
-  return ["public_key", "bvn", "nin", "token", "secret", "authorization", "password", "passcode"].some((part) => lower.includes(part));
+  return ["public_key", "bvn", "nin", "otp", "token", "secret", "authorization", "password", "passcode"].some((part) => lower.includes(part));
 }
 
 function formatStrowalletDate(value?: Date | null) {

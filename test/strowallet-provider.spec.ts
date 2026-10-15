@@ -66,22 +66,21 @@ describe("Strowallet provider", () => {
     });
   });
 
-  it("fetches BVN details before verifying registration BVN with the OTP phone number", async () => {
-    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_test" }), {} as never);
-    const request = jest.spyOn((service as never) as { request: jest.Mock }, "request")
-      .mockResolvedValueOnce({
-        status: true,
-        data: {
-          first_name: "Ada",
-          last_name: "Lovelace",
-          dob: "1990-01-02",
-          phone_number: "08000000000"
-        }
-      })
-      .mockResolvedValueOnce({
-        status: "success",
-        reference: "bvn_ref_1"
-      });
+  it("uses the live BVN details endpoint and returns the identity needed for selfie verification", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: " pk_live " }), {} as never);
+    const request = jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+      success: true,
+      message: "BVN details retrieved successfully",
+      data: {
+        reference: "bvn_ref_1",
+        first_name: "ADA",
+        middle_name: "BYRON",
+        last_name: "LOVELACE",
+        date_of_birth: "02-Jan-1990",
+        phone_number: "08000000000",
+        gender: "Female"
+      }
+    });
 
     const result = await service.verifyBvn("12345678901", "registration:reg_temp_123", {
       phoneNumber: "+2347057109319"
@@ -92,70 +91,30 @@ describe("Strowallet provider", () => {
       providerReference: "bvn_ref_1",
       bvnVerified: true,
       firstName: "ADA",
+      middleName: "BYRON",
       lastName: "LOVELACE",
-      dateOfBirth: "02-01-1990",
-      phoneNumber: "07057109319"
+      dateOfBirth: "02-Jan-1990",
+      phoneNumber: "08000000000",
+      gender: "Female"
     });
-    expect(request).toHaveBeenNthCalledWith(
-      1,
+    expect(request).toHaveBeenCalledWith(
       "get",
-      "/api/kyc_getbvnadvance/",
+      "/api/kyc_getbvn/",
       undefined,
-      { public_key: "pk_test", number: "12345678901" }
-    );
-    expect(request).toHaveBeenNthCalledWith(
-      2,
-      "post",
-      "/api/kyc_bvn/",
-      undefined,
-      expect.objectContaining({
-        public_key: "pk_test",
-        number: "12345678901",
-        firstName: "ADA",
-        lastName: "LOVELACE",
-        dateOfBirth: "02-01-1990",
-        phoneNumber: "07057109319"
-      })
+      { public_key: "pk_live", number: "12345678901" }
     );
   });
 
-  it("continues to the documented BVN verification endpoint when optional details enrichment fails", async () => {
-    const service = new StrowalletService(config({
-      STROWALLET_PUBLIC_KEY: "pk_test",
-      STROWALLET_KYC_DEFAULT_FIRST_NAME: "JOHN",
-      STROWALLET_KYC_DEFAULT_LAST_NAME: "DOE",
-      STROWALLET_KYC_DEFAULT_DOB: "01-01-1990"
-    }), {} as never);
-    const request = jest.spyOn((service as never) as { request: jest.Mock }, "request")
-      .mockRejectedValueOnce(new Error("details endpoint unavailable"))
-      .mockResolvedValueOnce({ status: "success", reference: "bvn_ref_fallback" });
-
-    await expect(service.verifyBvn("12345678901", "registration:reg_temp_123", {
-      phoneNumber: "+2347057109319"
-    })).resolves.toMatchObject({
-      providerReference: "bvn_ref_fallback",
-      bvnVerified: true,
-      firstName: "JOHN",
-      lastName: "DOE",
-      dateOfBirth: "01-01-1990",
-      phoneNumber: "07057109319"
+  it("rejects a Strowallet response that does not contain verified identity details", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_live" }), {} as never);
+    jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+      success: false,
+      message: "Invalid Public Key"
     });
 
-    expect(request).toHaveBeenNthCalledWith(
-      2,
-      "post",
-      "/api/kyc_bvn/",
-      undefined,
-      expect.objectContaining({
-        public_key: "pk_test",
-        number: "12345678901",
-        firstName: "JOHN",
-        lastName: "DOE",
-        dateOfBirth: "01-01-1990",
-        phoneNumber: "07057109319",
-        mode: "sandbox"
-      })
-    );
+    await expect(service.verifyBvn("12345678901")).rejects.toMatchObject({
+      code: "STROWALLET_BVN_LOOKUP_FAILED"
+    });
   });
 });
 

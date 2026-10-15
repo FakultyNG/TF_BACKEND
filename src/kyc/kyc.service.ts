@@ -26,9 +26,16 @@ export class KycService {
   ) {}
 
   async verifyBvn(userId: string, bvn: string) {
-    const result = await this.kycProvider.verifyBvn(bvn, userId);
     const kycReference = `kyc_ref_${uuid().replace(/-/g, "").slice(0, 12)}`;
-    const providerLogId = await this.logKycProvider(result.provider, "kyc_bvn_verify", kycReference, result.providerReference, result.bvnVerified ? "success" : "failed", result.rawProviderResponse);
+    const result = await this.kycProvider.verifyBvn(bvn, userId, { reference: kycReference });
+    const providerLogId = await this.logKycProvider(
+      result.provider,
+      "kyc_bvn_verify",
+      kycReference,
+      result.providerReference,
+      result.bvnVerified ? "success" : "failed",
+      result.rawProviderResponse
+    );
     await this.prisma.$transaction([
       this.prisma.kycRecord.create({
         data: {

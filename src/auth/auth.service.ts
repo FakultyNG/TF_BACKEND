@@ -62,10 +62,11 @@ export class AuthService {
 
   async verifyRegistrationBvn(registrationToken: string, bvn: string) {
     const { session, ttl } = await this.getRegistrationSession(registrationToken);
-    const result = await this.kycProvider.verifyBvn(bvn, `registration:${registrationToken}`, {
-      phoneNumber: session.phoneNumber
-    });
     const kycReference = `kyc_ref_${uuid().replace(/-/g, "").slice(0, 12)}`;
+    const result = await this.kycProvider.verifyBvn(bvn, `registration:${registrationToken}`, {
+      phoneNumber: session.phoneNumber,
+      reference: kycReference
+    });
     const kyc: RegistrationKycState = {
       kycReference,
       providerReference: result.providerReference,

@@ -148,9 +148,14 @@ describe("pre-registration KYC onboarding", () => {
       firstName: "Ada"
     });
 
-    expect(kycProvider.verifyBvn).toHaveBeenCalledWith("12345678901", `registration:${registrationToken}`, {
-      phoneNumber: "+2347057109319"
-    });
+    expect(kycProvider.verifyBvn).toHaveBeenCalledWith(
+      "12345678901",
+      `registration:${registrationToken}`,
+      {
+        phoneNumber: "+2347057109319",
+        reference: expect.stringMatching(/^kyc_ref_/)
+      }
+    );
     expect(redis.setJson).toHaveBeenCalledWith(
       registrationKey,
       expect.objectContaining({

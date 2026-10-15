@@ -274,15 +274,15 @@ The frontend must not call Prembly directly.
 
 Strowallet server-side implementation:
 
-- BVN details enrichment: `GET {STROWALLET_BASE_URL}/api/kyc_getbvnadvance/`
-- BVN verify: `POST {STROWALLET_BASE_URL}/api/kyc_bvn/`
-- During pre-registration BVN verification, TF backend uses the `phoneNumber` stored in the `registrationToken` session, fetches the BVN name/date-of-birth from Strowallet BVN details, and then submits those values to Strowallet Verify BVN. The mobile app still sends only `registrationToken` and `bvn`.
+- Live BVN lookup: `GET {STROWALLET_BASE_URL}/api/kyc_getbvn/`
+- The backend submits the BVN and public key, requires the returned first name, last name, and date of birth, and returns those details to the mobile app before selfie verification. The OTP-oriented Strowallet BVN endpoint is not used for this flow.
 
 BytID selfie KYC implementation:
 
 - BVN lookup: `POST {BYTID_BASE_URL}/identity/bvn` when `KYC_PROVIDER=bytid`
 - BVN face match: `POST {BYTID_BASE_URL}/identity/bvn/face-match`
 - `SELFIE_KYC_PROVIDER=bytid` uses BytID only for the selfie endpoint. `KYC_PROVIDER=strowallet` can remain the default for BVN lookup/verification.
+- The selfie request does not accept another BVN. The backend reads the original BVN from the short-lived registration/KYC Redis session using `kycReference`, sends that same BVN with the selfie to BytID, then removes the plain BVN after the face-match attempt.
 - TF backend sends the BVN number, the selfie image, and the first name, last name, and date of birth already returned by the BVN verification step. The app must not ask the user to re-enter those identity fields.
 - To enable the camera/selfie step, set `KYC_SELFIE_REQUIRED=true` and configure `BYTID_API_KEY`.
 - Configure BytID dashboard webhooks to `POST {PUBLIC_API_BASE_URL}/api/v1/webhooks/bytid`. TF verifies `Bytid-Signature` with `BYTID_WEBHOOK_SECRET`, logs the event, deduplicates `Bytid-Event-Id`, and updates matched KYC records from `verification.completed` / `kyc.completed` events.
