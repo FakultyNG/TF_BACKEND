@@ -146,6 +146,8 @@ export class BytidKycProvider implements KycProvider {
       const message = providerMessage(error);
       const diagnostics = providerDiagnostics(error);
       this.logger.warn({ provider: "bytid", method, url, message, ...diagnostics });
+      const providerFailure = providerApiException(error, url);
+      if (providerFailure) throw providerFailure;
       throw new ApiException("BytID BVN verification request failed", "BYTID_PROVIDER_ERROR", HttpStatus.BAD_GATEWAY, diagnostics);
     }
   }
@@ -170,6 +172,8 @@ function normalizeBytidBaseUrl(value: string) {
 
 function providerHttpStatus(code?: string) {
   switch (code) {
+    case "validation_error":
+      return HttpStatus.BAD_REQUEST;
     case "invalid_api_key":
       return HttpStatus.UNAUTHORIZED;
     case "insufficient_balance":
@@ -181,7 +185,12 @@ function providerHttpStatus(code?: string) {
       return HttpStatus.FORBIDDEN;
     case "rate_limited":
       return HttpStatus.TOO_MANY_REQUESTS;
+    case "duplicate_reference":
+      return HttpStatus.CONFLICT;
+    case "liveness_not_usable":
+      return HttpStatus.UNPROCESSABLE_ENTITY;
     case "check_unavailable":
+    case "internal_error":
       return HttpStatus.SERVICE_UNAVAILABLE;
     default:
       return HttpStatus.BAD_GATEWAY;
@@ -263,4 +272,56 @@ function providerDiagnostics(error: unknown) {
     providerCode: firstString(providerError.code, body.code),
     requestId: firstString(body.request_id)
   });
+}
+
+function providerApiException(error: unknown, path: string) {
+  if (!axios.isAxiosError(error) || !error.response) return undefined;
+  const body = objectOrEmpty(error.response.data);
+  const providerError = objectOrEmpty(body.error);
+  const providerCode = firstString(providerError.code, body.code);
+  if (!providerCode) return undefined;
+  const requestId = firstString(body.request_id);
+  return new ApiException(
+    providerPublicMessage(providerCode, path),
+    `BYTID_${providerCode.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`,
+    providerHttpStatus(providerCode),
+    stripUndefined({
+      providerCode,
+      requestId,
+      providerDetails: sanitize(providerError.details)
+    })
+  );
+}
+
+function providerPublicMessage(code: string, path: string) {
+  const faceMatch = path.includes("face-match");
+  switch (code) {
+    case "validation_error":
+      return faceMatch
+        ? "BytID rejected the selfie or BVN verification details"
+        : "BytID rejected the BVN verification details";
+    case "invalid_api_key":
+      return "BytID live API key is invalid or revoked";
+    case "insufficient_balance":
+      return "BytID account balance is insufficient";
+    case "live_not_enabled":
+      return "BytID live verification is not enabled for this account";
+    case "ip_not_allowed":
+      return "This server IP address is not allowed by BytID";
+    case "insufficient_scope":
+      return faceMatch
+        ? "BytID API key is not permitted to run BVN face matching"
+        : "BytID API key is not permitted to run BVN verification";
+    case "business_suspended":
+      return "The BytID business account is suspended";
+    case "duplicate_reference":
+      return "BytID has already processed this verification attempt";
+    case "rate_limited":
+      return "BytID request limit reached; please try again shortly";
+    case "check_unavailable":
+    case "internal_error":
+      return "BytID verification is temporarily unavailable";
+    default:
+      return "BytID rejected the verification request";
+  }
 }

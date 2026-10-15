@@ -109,7 +109,7 @@ export class AuthService {
       middleName: bvnProfile.middleName,
       lastName: bvnProfile.lastName,
       dateOfBirth: bvnProfile.dateOfBirth,
-      reference: kycReference
+      reference: selfieProviderReference(kycReference)
     });
     const kyc: RegistrationKycState = {
       ...session.kyc,
@@ -477,6 +477,10 @@ export class AuthService {
       }
     });
   }
+}
+
+function selfieProviderReference(kycReference: string) {
+  return `${kycReference}:selfie:${uuid().replace(/-/g, "").slice(0, 10)}`;
 }
 
 function parseProviderDate(value?: string) {

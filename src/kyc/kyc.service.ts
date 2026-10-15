@@ -114,7 +114,7 @@ export class KycService {
       middleName: record.middleName ?? undefined,
       lastName: record.lastName ?? undefined,
       dateOfBirth: formatDateForProvider(record.dateOfBirth),
-      reference: kycReference
+      reference: selfieProviderReference(kycReference)
     });
     const providerLogId = await this.logKycProvider(result.provider, "kyc_bvn_face_validate", kycReference, result.providerReference, result.faceMatch ? "success" : "failed", result.rawProviderResponse);
     const profileImageUrl = result.faceMatch ? uploadedSelfie.secureUrl : result.profileImageUrl;
@@ -293,6 +293,10 @@ function parseProviderDate(value?: string) {
   if (!value) return undefined;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
+function selfieProviderReference(kycReference: string) {
+  return `${kycReference}:selfie:${uuid().replace(/-/g, "").slice(0, 10)}`;
 }
 
 function formatDateForProvider(value?: Date | null) {

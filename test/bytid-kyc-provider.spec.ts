@@ -175,6 +175,41 @@ describe("BytID KYC provider", () => {
       confidenceScore: 92
     });
   });
+
+  it("maps live face-match permission errors to an actionable response", async () => {
+    const service = new BytidKycProvider(config({ BYTID_API_KEY: "uvk_live_123" }));
+    const http = ((service as never) as { http: { request: jest.Mock } }).http;
+    jest.spyOn(http, "request").mockRejectedValue({
+      isAxiosError: true,
+      message: "Request failed with status code 403",
+      response: {
+        status: 403,
+        data: {
+          success: false,
+          error: {
+            code: "insufficient_scope",
+            message: "The API key cannot run this check.",
+            details: { required_scope: "identity:bvn_face_match" }
+          },
+          request_id: "req_scope_1"
+        }
+      }
+    });
+
+    await expect(
+      service.verifyBvnWithSelfie("12345678901", "aGVsbG8=", "user_1", {
+        reference: "kyc_ref_1:selfie:attempt1"
+      })
+    ).rejects.toMatchObject({
+      code: "BYTID_INSUFFICIENT_SCOPE",
+      message: "BytID API key is not permitted to run BVN face matching",
+      details: {
+        providerCode: "insufficient_scope",
+        requestId: "req_scope_1",
+        providerDetails: { required_scope: "identity:bvn_face_match" }
+      }
+    });
+  });
 });
 
 describe("BytID webhooks", () => {

@@ -209,7 +209,7 @@ describe("pre-registration KYC onboarding", () => {
       middleName: undefined,
       lastName: "Lovelace",
       dateOfBirth: "1990-01-01",
-      reference: bvn.kycReference
+      reference: expect.stringMatching(new RegExp(`^${bvn.kycReference}:selfie:[a-f0-9]{10}$`))
     });
     expect((redisStore.get(registrationKey) as { kyc: { bvn?: string; selfieImageUrl: string } }).kyc.bvn).toBeUndefined();
     expect((redisStore.get(registrationKey) as { kyc: { selfieImageUrl: string } }).kyc.selfieImageUrl).toBe(
@@ -241,6 +241,16 @@ describe("pre-registration KYC onboarding", () => {
     expect(
       (redisStore.get(registrationKey) as { kyc: { bvn?: string } }).kyc.bvn
     ).toBe("12345678901");
+
+    const firstReference = selfieKycProvider.verifyBvnWithSelfie.mock.calls[0][3].reference;
+    await service.validateRegistrationSelfie(
+      registrationToken,
+      bvn.kycReference,
+      "data:image/jpeg;base64,aGVsbG8="
+    );
+    const secondReference = selfieKycProvider.verifyBvnWithSelfie.mock.calls[1][3].reference;
+    expect(secondReference).toMatch(new RegExp(`^${bvn.kycReference}:selfie:[a-f0-9]{10}$`));
+    expect(secondReference).not.toBe(firstReference);
   });
 
   it("creates the user and attaches verified pre-registration KYC on registration complete", async () => {

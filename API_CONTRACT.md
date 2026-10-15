@@ -290,8 +290,9 @@ BytID selfie KYC implementation:
 - BVN lookup: `POST {BYTID_BASE_URL}/identity/bvn` when `KYC_PROVIDER=bytid`
 - BVN face match: `POST {BYTID_BASE_URL}/identity/bvn/face-match`
 - `SELFIE_KYC_PROVIDER=bytid` uses BytID only for the selfie endpoint. `KYC_PROVIDER=strowallet` can remain the default for BVN lookup/verification.
-- The selfie request does not accept another BVN. The backend reads the original BVN from the short-lived registration/KYC Redis session using `kycReference`, sends that same BVN with the selfie to BytID, then removes the plain BVN after the face-match attempt.
+- The selfie request does not accept another BVN. The backend reads the original BVN from the short-lived registration/KYC Redis session using `kycReference`, sends that same BVN with the selfie to BytID, then removes the plain BVN after a successful face match or normal session expiry.
 - TF backend sends the BVN number, the selfie image, and the first name, last name, and date of birth already returned by the BVN verification step. The app must not ask the user to re-enter those identity fields.
+- Each selfie attempt uses a new BytID `reference` derived from the internal `kycReference`. This prevents a retry from being rejected as `duplicate_reference`; the public `kycReference` does not change.
 - To enable the camera/selfie step, set `KYC_SELFIE_REQUIRED=true` and configure `BYTID_API_KEY`.
 - Configure BytID dashboard webhooks to `POST {PUBLIC_API_BASE_URL}/api/v1/webhooks/bytid`. TF verifies `Bytid-Signature` with `BYTID_WEBHOOK_SECRET`, logs the event, deduplicates `Bytid-Event-Id`, and updates matched KYC records from `verification.completed` / `kyc.completed` events.
 
@@ -355,6 +356,14 @@ retains the already-verified BVN until its normal TTL expires. The frontend may
 reset the camera and retry this endpoint with a new selfie and the same
 `registrationToken` and `kycReference`. The raw BVN is cleared after a successful
 face match.
+
+BytID non-2xx responses are mapped to safe actionable API errors instead of a
+generic provider failure. Supported codes include `BYTID_VALIDATION_ERROR`,
+`BYTID_INVALID_API_KEY`, `BYTID_INSUFFICIENT_BALANCE`,
+`BYTID_LIVE_NOT_ENABLED`, `BYTID_IP_NOT_ALLOWED`,
+`BYTID_INSUFFICIENT_SCOPE`, `BYTID_DUPLICATE_REFERENCE`, and
+`BYTID_RATE_LIMITED`. Provider `request_id` and sanitized details are returned
+under `error.details` for support diagnostics.
 
 ## Request
 
