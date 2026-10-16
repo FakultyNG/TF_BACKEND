@@ -208,6 +208,10 @@ This checks the user's phone number, prepares registration, and sends the first
 live OTP in the same request. The mobile app must not immediately follow this
 with `/auth/otp/send`; that would send a duplicate OTP and add latency.
 
+If the normalized phone number already belongs to an account, no OTP is sent
+and the endpoint returns HTTP 409 with
+`error.code: "PHONE_NUMBER_ALREADY_REGISTERED"`.
+
 ### Request
 ```JSON
 {
@@ -274,6 +278,12 @@ If BVN or selfie verification has not passed, the backend returns:
 # BVN / KYC
 
 BVN verification is required before DVA creation, wallet activation, wallet funding, and transfers.
+
+A verified BVN can belong to only one Transfa account. Registration BVN lookup
+checks the SHA-256 hash before calling the live provider, and registration is
+checked again before account creation. An existing BVN returns HTTP 409 with
+`error.code: "BVN_ALREADY_REGISTERED"`. A database unique constraint provides
+the final race-condition safeguard; failed BVN checks do not reserve a BVN.
 
 Current KYC provider: backend-selected provider. `KYC_PROVIDER=strowallet` is the default; `KYC_PROVIDER=bytid` and `KYC_PROVIDER=prembly` are switchable server-side, and `KYC_PROVIDER=mock` is for local development.
 

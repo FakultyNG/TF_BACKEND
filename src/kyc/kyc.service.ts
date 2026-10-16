@@ -26,6 +26,18 @@ export class KycService {
   ) {}
 
   async verifyBvn(userId: string, bvn: string) {
+    const bvnHash = sha256(bvn);
+    const existing = await this.prisma.kycRecord.findFirst({
+      where: { bvnHash, bvnVerified: true },
+      select: { id: true }
+    });
+    if (existing) {
+      throw new ApiException(
+        "This BVN is already registered to a Transfa account.",
+        "BVN_ALREADY_REGISTERED",
+        HttpStatus.CONFLICT
+      );
+    }
     const kycReference = `kyc_ref_${uuid().replace(/-/g, "").slice(0, 12)}`;
     const result = await this.kycProvider.verifyBvn(bvn, userId, { reference: kycReference });
     const providerLogId = await this.logKycProvider(
@@ -43,7 +55,7 @@ export class KycService {
           kycReference,
           provider: result.provider,
           providerReference: result.providerReference,
-          bvnHash: sha256(bvn),
+          bvnHash: result.bvnVerified ? bvnHash : undefined,
           bvnMasked: result.bvnMasked,
           bvnVerified: result.bvnVerified,
           status: result.bvnVerified ? KycStatus.bvn_verified : KycStatus.rejected,

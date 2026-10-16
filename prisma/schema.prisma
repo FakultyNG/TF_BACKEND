@@ -579,7 +579,7 @@ model KycRecord {
   userId            String
   kycReference      String    @unique
   providerReference String?
-  bvnHash           String?
+  bvnHash           String?   @unique
   bvnMasked         String?
   bvnVerified       Boolean   @default(false)
   selfieVerified    Boolean   @default(false)
@@ -611,7 +611,6 @@ model KycRecord {
   @@index([status])
   @@index([provider])
   @@index([providerReference])
-  @@index([bvnHash])
 }
 
 model AuthSession {

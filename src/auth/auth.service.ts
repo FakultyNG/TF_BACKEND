@@ -44,7 +44,7 @@ export class AuthService {
       this.usersRepository.findByPhoneNumber(normalized),
       this.redis.getJson<string>(`registration-phone:${normalized}`)
     ]);
-    if (existing) throw new ApiException("User already exists", "USER_ALREADY_EXISTS", HttpStatus.CONFLICT);
+    if (existing) throw this.phoneAlreadyRegistered();
     const registrationToken = existingToken ?? `reg_temp_${uuid().replace(/-/g, "").slice(0, 12)}`;
     const ttl = Number(this.config.get<string>("REGISTRATION_TTL_SECONDS", "900"));
     if (!existingToken) {
@@ -69,6 +69,8 @@ export class AuthService {
 
   async verifyRegistrationBvn(registrationToken: string, bvn: string) {
     const { session, ttl } = await this.getRegistrationSession(registrationToken);
+    const bvnHash = sha256(bvn);
+    await this.ensureBvnIsAvailable(bvnHash);
     const kycReference = `kyc_ref_${uuid().replace(/-/g, "").slice(0, 12)}`;
     const result = await this.kycProvider.verifyBvn(bvn, `registration:${registrationToken}`, {
       phoneNumber: session.phoneNumber,
@@ -77,7 +79,7 @@ export class AuthService {
     const kyc: RegistrationKycState = {
       kycReference,
       providerReference: result.providerReference,
-      bvnHash: sha256(bvn),
+      bvnHash,
       bvnMasked: result.bvnMasked,
       bvn,
       bvnVerified: result.bvnVerified,
@@ -333,16 +335,32 @@ export class AuthService {
     if (!session.kyc || !this.isRegistrationKycComplete(session.kyc.status)) {
       throw new ApiException("KYC verification is required to complete registration", "REGISTRATION_KYC_REQUIRED", HttpStatus.BAD_REQUEST);
     }
-    const existing = await this.usersRepository.findByPhoneNumber(session.phoneNumber);
-    if (existing) throw new ApiException("User already exists", "USER_ALREADY_EXISTS", HttpStatus.CONFLICT);
+    const [existing, duplicateBvn] = await Promise.all([
+      this.usersRepository.findByPhoneNumber(session.phoneNumber),
+      this.findVerifiedBvn(session.kyc.bvnHash)
+    ]);
+    if (existing) throw this.phoneAlreadyRegistered();
+    if (duplicateBvn) throw this.bvnAlreadyRegistered();
     const passcodeHash = await bcrypt.hash(dto.passcode, 12);
-    const user = await this.usersRepository.createUser(session.phoneNumber, passcodeHash);
-    await this.attachRegistrationKyc(user.id, {
-      ...session.kyc,
-      status: session.kyc.status === KycStatus.bvn_verified && !this.isSelfieKycRequired()
-        ? KycStatus.verified
-        : session.kyc.status
-    });
+    let user;
+    try {
+      user = await this.usersRepository.createUser(session.phoneNumber, passcodeHash);
+    } catch (error) {
+      if (this.isUniqueConstraint(error, "phoneNumber")) throw this.phoneAlreadyRegistered();
+      throw error;
+    }
+    try {
+      await this.attachRegistrationKyc(user.id, {
+        ...session.kyc,
+        status: session.kyc.status === KycStatus.bvn_verified && !this.isSelfieKycRequired()
+          ? KycStatus.verified
+          : session.kyc.status
+      });
+    } catch (error) {
+      await this.prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
+      if (this.isUniqueConstraint(error, "bvnHash")) throw this.bvnAlreadyRegistered();
+      throw error;
+    }
     await this.autoProvisionAfterRegistrationKyc(user.id);
     await this.redis.del(`registration:${dto.registrationToken}`);
     await this.redis.del(`registration-phone:${session.phoneNumber}`);
@@ -581,6 +599,41 @@ export class AuthService {
     }
     const ttl = Number(this.config.get<string>("REGISTRATION_TTL_SECONDS", "900"));
     return { session, ttl };
+  }
+
+  private findVerifiedBvn(bvnHash: string) {
+    return this.prisma.kycRecord.findFirst({
+      where: { bvnHash, bvnVerified: true },
+      select: { id: true }
+    });
+  }
+
+  private async ensureBvnIsAvailable(bvnHash: string) {
+    if (await this.findVerifiedBvn(bvnHash)) throw this.bvnAlreadyRegistered();
+  }
+
+  private phoneAlreadyRegistered() {
+    return new ApiException(
+      "This phone number is already registered. Log in instead.",
+      "PHONE_NUMBER_ALREADY_REGISTERED",
+      HttpStatus.CONFLICT
+    );
+  }
+
+  private bvnAlreadyRegistered() {
+    return new ApiException(
+      "This BVN is already registered to a Transfa account.",
+      "BVN_ALREADY_REGISTERED",
+      HttpStatus.CONFLICT
+    );
+  }
+
+  private isUniqueConstraint(error: unknown, field: string) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") return false;
+    const target = error.meta?.target;
+    return Array.isArray(target)
+      ? target.some((value) => String(value).includes(field))
+      : String(target ?? "").includes(field);
   }
 
   private isSelfieKycRequired() {

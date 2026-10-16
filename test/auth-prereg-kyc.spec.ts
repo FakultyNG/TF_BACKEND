@@ -1,3 +1,4 @@
+import { HttpStatus } from "@nestjs/common";
 import { KycStatus, WalletStatus } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { AuthService } from "../src/auth/auth.service";
@@ -19,7 +20,10 @@ describe("pre-registration KYC onboarding", () => {
     };
     const redisStore = new Map<string, unknown>([[registrationKey, session]]);
     const txClient = {
-      kycRecord: { create: jest.fn().mockResolvedValue({ id: "kyc_db_1" }) },
+      kycRecord: {
+        create: jest.fn().mockResolvedValue({ id: "kyc_db_1" }),
+        findFirst: jest.fn().mockResolvedValue(null)
+      },
       profile: { upsert: jest.fn().mockResolvedValue({}) },
       user: { update: jest.fn().mockResolvedValue({}) },
       auditLog: { create: jest.fn().mockResolvedValue({}) }
@@ -31,7 +35,10 @@ describe("pre-registration KYC onboarding", () => {
       }),
       kycRecord: txClient.kycRecord,
       profile: txClient.profile,
-      user: txClient.user,
+      user: {
+        ...txClient.user,
+        delete: jest.fn().mockResolvedValue({})
+      },
       authSession: {
         create: jest.fn().mockResolvedValue({ id: "session_1" }),
         update: jest.fn().mockResolvedValue({})
@@ -181,6 +188,17 @@ describe("pre-registration KYC onboarding", () => {
     expect(otp.sendOtp).toHaveBeenCalledWith("2347057109319");
   });
 
+  it("rejects a phone number that already belongs to a user before sending OTP", async () => {
+    const { service, usersRepository, otp } = makeService();
+    usersRepository.findByPhoneNumber.mockResolvedValueOnce({ id: "existing_user" });
+
+    await expect(service.startRegistration("07057109319")).rejects.toMatchObject({
+      code: "PHONE_NUMBER_ALREADY_REGISTERED",
+      status: HttpStatus.CONFLICT
+    });
+    expect(otp.sendOtp).not.toHaveBeenCalled();
+  });
+
   it("verifies BVN against a registration token and stores temporary KYC state", async () => {
     const { service, redis, redisStore, kycProvider } = makeService();
 
@@ -212,6 +230,19 @@ describe("pre-registration KYC onboarding", () => {
       900
     );
     expect((redisStore.get(registrationKey) as { kyc: { userId?: string } }).kyc.userId).toBeUndefined();
+  });
+
+  it("rejects a BVN already attached to a verified customer before calling the provider", async () => {
+    const { service, prisma, kycProvider } = makeService();
+    prisma.kycRecord.findFirst.mockResolvedValueOnce({ id: "existing_kyc" });
+
+    await expect(
+      service.verifyRegistrationBvn(registrationToken, "12345678901")
+    ).rejects.toMatchObject({
+      code: "BVN_ALREADY_REGISTERED",
+      status: HttpStatus.CONFLICT
+    });
+    expect(kycProvider.verifyBvn).not.toHaveBeenCalled();
   });
 
   it("validates selfie for a pre-registration KYC reference and keeps the secure Cloudinary URL", async () => {
@@ -375,5 +406,30 @@ describe("pre-registration KYC onboarding", () => {
     expect(wallet.createDva).toHaveBeenCalledWith("user_1", "auto");
     expect(cashDrop.register).toHaveBeenCalledWith("user_1");
     expect(redis.del).toHaveBeenCalledWith(registrationKey);
+  });
+
+  it("rechecks BVN uniqueness before creating the user", async () => {
+    const { service, prisma, usersRepository } = makeService();
+    const bvn = await service.verifyRegistrationBvn(
+      registrationToken,
+      "12345678901"
+    );
+    await service.validateRegistrationSelfie(
+      registrationToken,
+      bvn.kycReference,
+      "data:image/jpeg;base64,aGVsbG8="
+    );
+    prisma.kycRecord.findFirst.mockResolvedValueOnce({ id: "existing_kyc" });
+
+    await expect(
+      service.completeRegistration(
+        { registrationToken, passcode: "123456" },
+        { ipAddress: "127.0.0.1" }
+      )
+    ).rejects.toMatchObject({
+      code: "BVN_ALREADY_REGISTERED",
+      status: HttpStatus.CONFLICT
+    });
+    expect(usersRepository.createUser).not.toHaveBeenCalled();
   });
 });
