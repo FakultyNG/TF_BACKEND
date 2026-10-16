@@ -21,6 +21,7 @@ describe("CashDropService", () => {
           status: CashDropProfileStatus.active
         }),
         findUnique: jest.fn().mockResolvedValue(overrides.profile),
+        findFirst: jest.fn().mockResolvedValue(overrides.profile),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findMany: jest.fn().mockResolvedValue(overrides.profiles ?? [])
       },
@@ -140,6 +141,22 @@ describe("CashDropService", () => {
     });
 
     await expect(service.resolve("scanner_1", "data:image/png;base64,test")).rejects.toMatchObject({ code: "CASH_DROP_NO_SAFE_MATCH" });
+  });
+
+  it("uses the CashDrop threshold when matching a registered face for unlock", async () => {
+    const { service } = createService({
+      profile: {
+        userId: "user_1",
+        fingerprint: "11110000",
+        status: CashDropProfileStatus.active
+      },
+      confidence: 94,
+      config: { CASH_DROP_MATCH_THRESHOLD: "92" }
+    });
+
+    await expect(
+      service.matchRegisteredFace("user_1", "data:image/png;base64,test")
+    ).resolves.toEqual({ matched: true, confidence: 94, threshold: 92 });
   });
 
   it("does not resolve disabled CashDrop profiles", async () => {

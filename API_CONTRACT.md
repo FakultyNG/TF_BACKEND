@@ -548,7 +548,33 @@ POST /auth/logout
 
 Passcode is a 5-digit numeric app password.
 
-1. Change Passcode
+1. Verify Active-Session Passcode
+
+POST /auth/passcode/verify
+
+Requires `Authorization: Bearer <access_token>`. Mobile uses this endpoint on
+`/unlock/passcode` when a locally restored access/refresh session is still
+active.
+
+## Request
+```json
+{
+  "passcode": "12345"
+}
+```
+
+## Success Response
+```json
+{
+  "success": true,
+  "message": "Passcode verified successfully",
+  "data": {
+    "verified": true
+  }
+}
+```
+
+2. Change Passcode
 
 PATCH /auth/passcode/change
 
@@ -569,7 +595,7 @@ PATCH /auth/passcode/change
   }
 }
 ```
-2. Reset Passcode
+3. Reset Passcode
 
 POST /auth/passcode/reset/request
 
@@ -594,7 +620,7 @@ Sends OTP to the user's registered phone number.
 }
 ```
 
-3. Verify Passcode Reset OTP
+4. Verify Passcode Reset OTP
 
 POST /auth/passcode/reset/verify
 
@@ -620,7 +646,7 @@ POST /auth/passcode/reset/verify
 }
 ```
 
-4. Complete Passcode Reset
+5. Complete Passcode Reset
 
 POST /auth/passcode/reset/complete
 
@@ -643,6 +669,76 @@ POST /auth/passcode/reset/complete
     "reset": true
   }
 }
+```
+
+# FACE UNLOCK
+
+Face unlock compares a newly captured front-camera image with the customer's
+active CashDrop camera profile. It does not use the BVN provider photo. A
+successful match issues the same mobile access and refresh tokens as passcode
+login. Face unlock is available only when both `CASH_DROP_ENABLED` and
+`FACE_UNLOCK_ENABLED` are enabled.
+
+1. Fetch Face Unlock Configuration
+
+GET /auth/face-unlock/config
+
+## Success Response
+```json
+{
+  "success": true,
+  "message": "Face unlock config fetched successfully",
+  "data": {
+    "enabled": true,
+    "countdownEnabled": true,
+    "countdownSeconds": 5,
+    "maxAttempts": 3,
+    "lockoutSeconds": 3600
+  }
+}
+```
+
+2. Unlock With Face
+
+POST /auth/face-unlock
+
+## Request
+```json
+{
+  "phoneNumber": "08103100000",
+  "faceImageBase64": "data:image/jpeg;base64,/9j/4AAQ..."
+}
+```
+
+## Success Response
+```json
+{
+  "success": true,
+  "message": "Face unlock successful",
+  "data": {
+    "accessToken": "jwt_access_token",
+    "refreshToken": "jwt_refresh_token",
+    "user": {
+      "id": "user_uuid",
+      "phoneNumber": "2348103100000"
+    }
+  }
+}
+```
+
+Failed matches return `FACE_UNLOCK_FAILED`. After `FACE_UNLOCK_MAX_ATTEMPTS`
+failed matches, requests return `FACE_UNLOCK_LOCKED` until
+`FACE_UNLOCK_LOCKOUT_SECONDS` expires. Matching uses
+`CASH_DROP_MATCH_THRESHOLD`.
+
+Relevant environment variables:
+
+```text
+FACE_UNLOCK_ENABLED=true
+FACE_UNLOCK_COUNTDOWN_ENABLED=true
+FACE_UNLOCK_COUNTDOWN_SECONDS=5
+FACE_UNLOCK_MAX_ATTEMPTS=3
+FACE_UNLOCK_LOCKOUT_SECONDS=3600
 ```
 
 # DEDICATED VIRTUAL ACCOUNT

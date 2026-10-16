@@ -5,6 +5,7 @@ import { success } from "../common/api-response";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AuthService } from "./auth.service";
 import { CompleteRegistrationDto } from "./dto/complete-registration.dto";
+import { FaceUnlockDto } from "./dto/face-unlock.dto";
 import { LoginDto } from "./dto/login.dto";
 import { RefreshTokenDto } from "./dto/refresh-token.dto";
 import { RegisterKycBvnDto } from "./dto/register-kyc-bvn.dto";
@@ -88,6 +89,20 @@ export class AuthController {
       userAgent: req.headers["user-agent"]
     });
     return success("Login successful", data);
+  }
+
+  @Get("face-unlock/config")
+  faceUnlockConfig() {
+    return success("Face unlock config fetched successfully", this.authService.faceUnlockConfig());
+  }
+
+  @Post("face-unlock")
+  async faceUnlock(@Body() dto: FaceUnlockDto, @Req() req: Request) {
+    const data = await this.authService.faceUnlock(dto.phoneNumber, dto.faceImageBase64, {
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"]
+    });
+    return success("Face unlock successful", data);
   }
 
   @Post("refresh-token")

@@ -256,10 +256,32 @@ export class CashDropService {
     }
   }
 
+  async matchRegisteredFace(userId: string, faceImageBase64: string) {
+    this.enforceEnabled();
+    const profile = await this.prisma.cashDropProfile.findFirst({
+      where: { userId, status: CashDropProfileStatus.active }
+    });
+    if (!profile) return { matched: false, confidence: 0, threshold: this.matchThreshold() };
+
+    try {
+      const scanned = await this.fingerprintService.fingerprintFromBase64(faceImageBase64);
+      const confidence = this.fingerprintService.compare(scanned.fingerprint, profile.fingerprint);
+      const threshold = this.matchThreshold();
+      return { matched: confidence >= threshold, confidence, threshold };
+    } catch {
+      return { matched: false, confidence: 0, threshold: this.matchThreshold() };
+    }
+  }
+
   private enforceEnabled() {
     if (!this.isEnabled()) {
       throw new ApiException("CashDrop is disabled", "CASH_DROP_DISABLED", HttpStatus.FORBIDDEN);
     }
+  }
+
+  private matchThreshold() {
+    const configured = Number(this.config.get<string>("CASH_DROP_MATCH_THRESHOLD", "92"));
+    return Number.isFinite(configured) ? Math.min(100, Math.max(0, configured)) : 92;
   }
 
   private async auditResolve(actorId: string, matched: boolean, confidence: number, receiverId?: string) {

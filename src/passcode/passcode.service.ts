@@ -36,6 +36,14 @@ export class PasscodeService {
     return { changed: true };
   }
 
+  async verify(userId: string, passcode: string) {
+    const user = await this.usersRepository.findById(userId);
+    if (!user || !(await bcrypt.compare(passcode, user.passcodeHash))) {
+      throw new ApiException("Invalid passcode", "INVALID_PASSCODE", HttpStatus.UNAUTHORIZED);
+    }
+    return { verified: true };
+  }
+
   async requestReset(phoneNumber: string) {
     const normalized = normalizePhoneNumber(phoneNumber);
     const user = await this.usersRepository.findByPhoneNumber(normalized);

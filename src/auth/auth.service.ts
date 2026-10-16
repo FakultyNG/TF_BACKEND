@@ -372,6 +372,79 @@ export class AuthService {
     return this.issueMobileTokens(user.id, meta);
   }
 
+  faceUnlockConfig() {
+    const seconds = Number(this.config.get<string>("FACE_UNLOCK_COUNTDOWN_SECONDS", "5"));
+    return {
+      enabled: this.cashDropService.isEnabled() && ["1", "true", "yes", "on"].includes(
+        this.config.get<string>("FACE_UNLOCK_ENABLED", "true").toLowerCase()
+      ),
+      countdownEnabled: ["1", "true", "yes", "on"].includes(
+        this.config.get<string>("FACE_UNLOCK_COUNTDOWN_ENABLED", "true").toLowerCase()
+      ),
+      countdownSeconds: Number.isFinite(seconds) ? Math.min(10, Math.max(1, Math.round(seconds))) : 5,
+      maxAttempts: this.faceUnlockMaxAttempts(),
+      lockoutSeconds: this.faceUnlockLockoutSeconds()
+    };
+  }
+
+  private faceUnlockMaxAttempts() {
+    const configured = Number(this.config.get<string>("FACE_UNLOCK_MAX_ATTEMPTS", "3"));
+    return Number.isFinite(configured) ? Math.min(10, Math.max(1, Math.round(configured))) : 3;
+  }
+
+  private faceUnlockLockoutSeconds() {
+    const configured = Number(this.config.get<string>("FACE_UNLOCK_LOCKOUT_SECONDS", "3600"));
+    return Number.isFinite(configured) ? Math.max(60, Math.round(configured)) : 3600;
+  }
+
+  async faceUnlock(
+    phoneNumber: string,
+    faceImageBase64: string,
+    meta: { ipAddress?: string; userAgent?: string }
+  ) {
+    const config = this.faceUnlockConfig();
+    if (!config.enabled) {
+      throw new ApiException("Face unlock is disabled", "FACE_UNLOCK_DISABLED", HttpStatus.FORBIDDEN);
+    }
+    const normalized = normalizePhoneNumber(phoneNumber);
+    const attemptsKey = `face-unlock-attempts:${normalized}`;
+    const attempts = (await this.redis.getJson<number>(attemptsKey)) ?? 0;
+    if (attempts >= config.maxAttempts) {
+      throw new ApiException(
+        `Face unlock is locked after ${config.maxAttempts} failed attempts`,
+        "FACE_UNLOCK_LOCKED",
+        HttpStatus.TOO_MANY_REQUESTS
+      );
+    }
+
+    const user = await this.usersRepository.findByPhoneNumber(normalized);
+    const result = user?.status === "active"
+      ? await this.cashDropService.matchRegisteredFace(user.id, faceImageBase64)
+      : { matched: false, confidence: 0, threshold: 0 };
+    if (!user || !result.matched) {
+      const failedAttempts = await this.redis.incrementWithTtl(attemptsKey, config.lockoutSeconds);
+      await this.audit(user?.id, "FACE_UNLOCK_FAILED", "User", user?.id, {
+        confidence: result.confidence,
+        failedAttempts
+      });
+      if (failedAttempts >= config.maxAttempts) {
+        await this.redis.setJson(attemptsKey, failedAttempts, config.lockoutSeconds);
+        throw new ApiException(
+          `Face unlock is locked after ${config.maxAttempts} failed attempts`,
+          "FACE_UNLOCK_LOCKED",
+          HttpStatus.TOO_MANY_REQUESTS
+        );
+      }
+      throw new ApiException("Face not recognized", "FACE_UNLOCK_FAILED", HttpStatus.UNAUTHORIZED);
+    }
+
+    await this.redis.del(attemptsKey);
+    await this.audit(user.id, "FACE_UNLOCK_SUCCESS", "User", user.id, {
+      confidence: result.confidence
+    });
+    return this.issueMobileTokens(user.id, meta);
+  }
+
   async refreshToken(refreshToken: string) {
     let payload: { sub: string; sid: string; typ: string };
     try {

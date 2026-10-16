@@ -7,6 +7,7 @@ import { ChangePasscodeDto } from "./dto/change-passcode.dto";
 import { CompleteResetDto } from "./dto/complete-reset.dto";
 import { RequestResetDto } from "./dto/request-reset.dto";
 import { VerifyResetDto } from "./dto/verify-reset.dto";
+import { VerifyPasscodeDto } from "./dto/verify-passcode.dto";
 import { PasscodeService } from "./passcode.service";
 
 @ApiTags("Passcode")
@@ -20,6 +21,14 @@ export class PasscodeController {
   async change(@CurrentUser() user: { sub: string }, @Body() dto: ChangePasscodeDto) {
     const data = await this.passcodeService.change(user.sub, dto.oldPasscode, dto.newPasscode);
     return success("Passcode changed successfully", data);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post("verify")
+  async verify(@CurrentUser() user: { sub: string }, @Body() dto: VerifyPasscodeDto) {
+    const data = await this.passcodeService.verify(user.sub, dto.passcode);
+    return success("Passcode verified successfully", data);
   }
 
   @Post("reset/request")
