@@ -22,10 +22,17 @@ import { CashDropModule } from "./cash-drop/cash-drop.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
 import { UploadsModule } from "./uploads/uploads.module";
 import { HealthModule } from "./health/health.module";
+import { ServeStaticModule } from "@nestjs/serve-static";
+import { join } from "path";
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ServeStaticModule.forRoot({
+      rootPath: join(__dirname, "..", "..", "admin", "dist"),
+      serveRoot: "/admin-dashboard",
+      exclude: ["/api/(.*)"]
+    }),
     PrismaModule,
     RedisModule,
     ProvidersModule,

@@ -9,14 +9,14 @@ export class UsersRepository {
   findByPhoneNumber(phoneNumber: string) {
     return this.prisma.user.findUnique({
       where: { phoneNumber },
-      include: { profile: true, kycRecords: { orderBy: { createdAt: "desc" }, take: 1 } }
+      include: { profile: true, adminProfile: true, kycRecords: { orderBy: { createdAt: "desc" }, take: 1 } }
     });
   }
 
   findById(id: string) {
     return this.prisma.user.findUnique({
       where: { id },
-      include: { profile: true, kycRecords: { orderBy: { createdAt: "desc" }, take: 1 } }
+      include: { profile: true, adminProfile: true, kycRecords: { orderBy: { createdAt: "desc" }, take: 1 } }
     });
   }
 

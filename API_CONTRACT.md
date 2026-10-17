@@ -2625,6 +2625,48 @@ file: image/file upload
 
 # ADMIN KYC MANAGEMENT
 
+## Admin dashboard and access management
+
+The dashboard is served from `/admin-dashboard/`. Authentication uses `POST /api/v1/admin/auth/login` with the phone number and 5-digit passcode configured for the environment-seeded super-admin or created by an existing super-admin.
+
+New dashboard endpoints:
+
+- `GET /api/v1/admin/auth/me` returns the logged-in administrator, role, profile, and effective permissions.
+- `GET /api/v1/admin/dashboard` returns user, wallet, transaction-volume, and open-conversation summary data plus recent transactions.
+- `GET /api/v1/admin/admins` lists administrators and available feature permissions. `SUPER_ADMIN` only.
+- `POST /api/v1/admin/admins` creates an administrator with a role, profile, 5-digit passcode, and selected `permissions`. `SUPER_ADMIN` only.
+- `PATCH /api/v1/admin/admins/:adminId` updates permissions, role, passcode, name, or active state. `SUPER_ADMIN` only.
+- `GET /api/v1/admin/support/tickets/conversations/list` returns one continuous support-thread summary per user.
+- `GET /api/v1/admin/support/tickets/conversations/:userId` returns retained support-message history across that user's threads.
+- `POST /api/v1/admin/support/tickets/conversations/:userId/messages` sends an admin chat message with optional previously uploaded `attachmentUrls`.
+- `POST /api/v1/admin/notifications/broadcast` creates an in-app notification for `all_users` and sends it to every active FCM device token in batches.
+
+Supported permission values are `dashboard.view`, `users.view`, `users.manage`, `wallets.view`, `wallets.manage`, `transactions.view`, `transactions.manage`, `kyc.view`, `kyc.manage`, `support.view`, `support.reply`, `notifications.view`, `notifications.send`, `fees.view`, `fees.manage`, `audit.view`, and `admins.manage`. The environment-created `SUPER_ADMIN` always has all permissions.
+
+Admin creation request example:
+
+```json
+{
+  "phoneNumber": "2348012345678",
+  "passcode": "48291",
+  "firstName": "Ada",
+  "lastName": "Okafor",
+  "email": "ada@transfa.app",
+  "role": "SUPPORT",
+  "permissions": ["dashboard.view", "users.view", "support.view", "support.reply"]
+}
+```
+
+Broadcast request example:
+
+```json
+{
+  "title": "Scheduled maintenance",
+  "message": "Transfers will be briefly unavailable at 02:00 WAT.",
+  "deepLink": "tf://home"
+}
+```
+
 Admin endpoints require admin JWT:
 
 ```http

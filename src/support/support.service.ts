@@ -171,6 +171,98 @@ export class SupportService {
     return { items, pagination: pagination(page, limit, total) };
   }
 
+  async listAdminConversations(search?: string) {
+    const users = await this.prisma.user.findMany({
+      where: {
+        role: "USER",
+        supportTickets: { some: {} },
+        ...(search
+          ? {
+              OR: [
+                { phoneNumber: { contains: search } },
+                { profile: { firstName: { contains: search, mode: "insensitive" as const } } },
+                { profile: { lastName: { contains: search, mode: "insensitive" as const } } }
+              ]
+            }
+          : {})
+      },
+      take: 100,
+      select: {
+        id: true,
+        phoneNumber: true,
+        profile: true,
+        supportTickets: {
+          take: 1,
+          orderBy: { updatedAt: "desc" },
+          include: { messages: { take: 1, orderBy: { createdAt: "desc" }, include: { attachments: true } } }
+        }
+      },
+      orderBy: { updatedAt: "desc" }
+    });
+    return {
+      items: users.map((user) => {
+        const thread = user.supportTickets[0];
+        const last = thread?.messages[0];
+        return {
+          userId: user.id,
+          phoneNumber: user.phoneNumber,
+          profile: user.profile,
+          status: thread?.status ?? "open",
+          lastMessage: last?.message ?? "",
+          lastMessageAt: last?.createdAt ?? thread?.updatedAt,
+          hasAttachment: Boolean(last?.attachmentUrl || last?.attachments.length)
+        };
+      })
+    };
+  }
+
+  async getAdminConversation(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        phoneNumber: true,
+        profile: true,
+        supportTickets: {
+          orderBy: { createdAt: "asc" },
+          include: { messages: { orderBy: { createdAt: "asc" }, include: { attachments: true } } }
+        }
+      }
+    });
+    if (!user) throw new ApiException("User not found", "USER_NOT_FOUND", HttpStatus.NOT_FOUND);
+    return {
+      user: { id: user.id, phoneNumber: user.phoneNumber, profile: user.profile },
+      messages: user.supportTickets.flatMap((thread) =>
+        thread.messages.map((message) => ({
+          id: message.id,
+          threadId: thread.id,
+          sender: message.senderType === SupportMessageSenderType.admin ? "admin" : message.senderType,
+          senderId: message.senderId,
+          message: message.message,
+          attachments: message.attachments,
+          attachmentUrl: message.attachmentUrl,
+          createdAt: message.createdAt
+        }))
+      ).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+    };
+  }
+
+  async adminMessageUser(adminId: string, userId: string, dto: ReplySupportTicketDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!user) throw new ApiException("User not found", "USER_NOT_FOUND", HttpStatus.NOT_FOUND);
+    let thread = await this.prisma.supportTicket.findFirst({
+      where: { userId, status: { in: [SupportTicketStatus.open, SupportTicketStatus.pending, SupportTicketStatus.reopened] } },
+      orderBy: { updatedAt: "desc" }
+    });
+    if (!thread) {
+      thread = await this.prisma.supportTicket.create({
+        data: { userId, subject: "Support chat", category: "general", status: SupportTicketStatus.open, assignedAdminId: adminId }
+      });
+    }
+    const result = await this.adminReply(adminId, thread.id, dto);
+    return { ...result, userId };
+  }
+
   async getAdminTicket(ticketId: string) {
     const ticket = await this.prisma.supportTicket.findUnique({
       where: { id: ticketId },

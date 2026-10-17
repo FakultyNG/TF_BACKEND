@@ -16,10 +16,12 @@ import { AdminBootstrapService } from "./admin-bootstrap.service";
 import { AdminService } from "./admin.service";
 import { AdminSupportController } from "./admin-support.controller";
 import { AdminUsersExtraController } from "./admin-users-extra.controller";
+import { AdminAccessController } from "./admin-access.controller";
+import { AdminPermissionsGuard } from "../auth/guards/admin-permissions.guard";
 
 @Module({
   imports: [AuthModule, UsersModule, KycModule, WalletModule, TransfersModule, GiftCardsModule, PricingModule, SupportModule, ProfileModule, BiometricsModule, NotificationsModule],
-  controllers: [AdminController, AdminSupportController, AdminUsersExtraController, AdminNotificationsController],
-  providers: [AdminService, AdminBootstrapService]
+  controllers: [AdminController, AdminAccessController, AdminSupportController, AdminUsersExtraController, AdminNotificationsController],
+  providers: [AdminService, AdminBootstrapService, AdminPermissionsGuard]
 })
 export class AdminModule {}

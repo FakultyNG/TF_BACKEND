@@ -4,6 +4,7 @@ import { UserRole } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { normalizePhoneNumber } from "../common/utils/phone.util";
 import { PrismaService } from "../prisma/prisma.service";
+import { ADMIN_PERMISSIONS } from "./admin-permissions";
 
 @Injectable()
 export class AdminBootstrapService implements OnApplicationBootstrap {
@@ -52,8 +53,24 @@ export class AdminBootstrapService implements OnApplicationBootstrap {
 
     await this.prisma.profile.upsert({
       where: { userId: user.id },
-      update: { firstName: "Transfa", lastName: "Admin", country: "Nigeria" },
-      create: { userId: user.id, firstName: "Transfa", lastName: "Admin", country: "Nigeria" }
+      update: {
+        firstName: this.config.get<string>("ADMIN_FIRST_NAME", "Transfa"),
+        lastName: this.config.get<string>("ADMIN_LAST_NAME", "Admin"),
+        email: this.config.get<string>("ADMIN_EMAIL") || undefined,
+        country: "Nigeria"
+      },
+      create: {
+        userId: user.id,
+        firstName: this.config.get<string>("ADMIN_FIRST_NAME", "Transfa"),
+        lastName: this.config.get<string>("ADMIN_LAST_NAME", "Admin"),
+        email: this.config.get<string>("ADMIN_EMAIL") || undefined,
+        country: "Nigeria"
+      }
+    });
+    await this.prisma.adminProfile.upsert({
+      where: { userId: user.id },
+      update: { permissions: [...ADMIN_PERMISSIONS], isActive: true },
+      create: { userId: user.id, permissions: [...ADMIN_PERMISSIONS], isActive: true }
     });
 
     this.logger.log(`Admin bootstrap ensured SUPER_ADMIN user ${phoneNumber}`);

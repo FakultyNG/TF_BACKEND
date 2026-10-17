@@ -9,6 +9,7 @@ import { CreateNotificationDto } from "./dto/create-notification.dto";
 import { NotificationQueryDto } from "./dto/notification-query.dto";
 import { SendNotificationDto } from "./dto/send-notification.dto";
 import { RegisterDeviceTokenDto } from "./dto/register-device-token.dto";
+import { BroadcastNotificationDto } from "./dto/broadcast-notification.dto";
 
 @Injectable()
 export class NotificationsService {
@@ -135,21 +136,44 @@ export class NotificationsService {
     return { notification, push };
   }
 
+  async broadcastToAll(adminId: string, dto: BroadcastNotificationDto) {
+    const notification = await this.createNotification({
+      title: dto.title,
+      message: dto.message,
+      category: "announcement",
+      type: "admin_broadcast",
+      priority: "normal",
+      imageUrl: dto.imageUrl,
+      deepLink: dto.deepLink,
+      audience: NotificationAudience.all_users,
+      status: NotificationStatus.published,
+      createdById: adminId
+    });
+    const push = await this.sendPushForNotification(notification);
+    await this.audit(adminId, "ADMIN_NOTIFICATION_BROADCAST", notification.id, push as unknown as Prisma.InputJsonObject);
+    return { notification, push };
+  }
+
   async sendPushForNotification(notification: PushableNotification) {
     if (notification.status !== NotificationStatus.published) return { attempted: false, reason: "NOTIFICATION_NOT_PUBLISHED" };
     const tokens = await this.activeTokensForNotification(notification);
     if (!tokens.length) return { attempted: false, successCount: 0, failureCount: 0 };
     const payload = this.toFcmPayload(notification);
-    const response = await this.firebase.sendToMultipleDevices(tokens.map((token) => token.fcmToken), payload);
-    await Promise.all(
-      response.responses.map((result, index) => {
+    let successCount = 0;
+    let failureCount = 0;
+    for (let start = 0; start < tokens.length; start += 500) {
+      const batch = tokens.slice(start, start + 500);
+      const response = await this.firebase.sendToMultipleDevices(batch.map((token) => token.fcmToken), payload);
+      successCount += response.successCount;
+      failureCount += response.failureCount;
+      await Promise.all(response.responses.map((result, index) => {
         if (!result.success && this.firebase.isInvalidTokenError(result.errorCode)) {
-          return this.prisma.userDeviceToken.update({ where: { id: tokens[index].id }, data: { isActive: false } });
+          return this.prisma.userDeviceToken.update({ where: { id: batch[index].id }, data: { isActive: false } });
         }
         return Promise.resolve();
-      })
-    );
-    return { attempted: true, successCount: response.successCount, failureCount: response.failureCount };
+      }));
+    }
+    return { attempted: true, successCount, failureCount };
   }
 
   async createAdmin(adminId: string, dto: CreateNotificationDto) {
@@ -317,7 +341,7 @@ export class NotificationsService {
       return this.prisma.userDeviceToken.findMany({ where: { userId: notification.targetUserId, isActive: true } });
     }
     if (notification.audience === NotificationAudience.all_users) {
-      return this.prisma.userDeviceToken.findMany({ where: { isActive: true }, take: 500 });
+      return this.prisma.userDeviceToken.findMany({ where: { isActive: true } });
     }
     return Promise.resolve([]);
   }

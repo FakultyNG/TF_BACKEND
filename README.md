@@ -55,6 +55,11 @@ Admin APIs are separated under `/api/v1/admin`, use a separate admin JWT secret,
 Included admin endpoints:
 
 - `POST /api/v1/admin/auth/login`
+- `GET /api/v1/admin/auth/me`
+- `GET /api/v1/admin/dashboard`
+- `GET /api/v1/admin/admins`
+- `POST /api/v1/admin/admins`
+- `PATCH /api/v1/admin/admins/:adminId`
 - `GET /api/v1/admin/users`
 - `GET /api/v1/admin/users/:id`
 - `GET /api/v1/admin/kyc-records`
@@ -105,9 +110,15 @@ Included admin endpoints:
 - `POST /api/v1/admin/webhooks/logs/:webhookLogId/retry`
 - `GET /api/v1/admin/webhooks/summary`
 - `POST /api/v1/admin/support/tickets/attachments/upload`
+- `GET /api/v1/admin/support/tickets/conversations/list`
+- `GET /api/v1/admin/support/tickets/conversations/:userId`
+- `POST /api/v1/admin/support/tickets/conversations/:userId/messages`
+- `POST /api/v1/admin/notifications/broadcast`
 - `POST /api/v1/uploads/notification-image`
 
-Admin notification create/send endpoints now create the database notification first, then attempt Firebase push delivery for active user device tokens when the notification is published.
+The responsive dashboard UI is built from `admin/` and served by the Railway backend at `/admin-dashboard`. Its brand colors and rounded visual language mirror the Transfa mobile application. Admin feature permissions are stored in `AdminProfile` and enforced by backend guards; hiding a navigation item is not the security boundary.
+
+Admin notification create/send endpoints create the database notification first, then attempt Firebase push delivery for active user device tokens when the notification is published. All-user broadcasts are split into Firebase-supported batches of 500 devices.
 
 ## Local Setup
 
@@ -566,9 +577,14 @@ The seed creates an admin user using:
 ```text
 ADMIN_PHONE_NUMBER=2348000000000
 ADMIN_PASSCODE=12345
+ADMIN_FIRST_NAME=Transfa
+ADMIN_LAST_NAME=Admin
+ADMIN_EMAIL=admin@example.com
 ADMIN_BOOTSTRAP_ENABLED=false
 ```
 
 Change these values in `.env` before running `npm run prisma:seed` in shared environments. The seed normalizes `ADMIN_PHONE_NUMBER`, so `070...` and `23470...` resolve to the same stored format used by admin login.
 
-For Render/manual deployments where running a seed is inconvenient, set `ADMIN_BOOTSTRAP_ENABLED=true` with the real `ADMIN_PHONE_NUMBER` and 5-digit `ADMIN_PASSCODE`. On startup, the backend creates or repairs that user as `SUPER_ADMIN` and syncs the passcode hash from env. Keep this disabled unless you intentionally want the admin account controlled by environment variables.
+For Railway deployments, set `ADMIN_BOOTSTRAP_ENABLED=true` with the real `ADMIN_PHONE_NUMBER`, 5-digit `ADMIN_PASSCODE`, administrator name, and optional email. On startup, the backend creates or repairs that user as `SUPER_ADMIN`, grants every dashboard permission, and syncs the passcode hash from env. Keep this disabled unless you intentionally want the primary admin account controlled by environment variables.
+
+Railway builds the React dashboard inside the backend Docker image. After deployment, open `https://YOUR-RAILWAY-DOMAIN/admin-dashboard/`. Run `npm run admin:dev` for local dashboard development and `npm run admin:build` for a production frontend build.

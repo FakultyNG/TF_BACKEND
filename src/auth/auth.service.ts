@@ -17,6 +17,7 @@ import { CloudinaryService } from "../uploads/cloudinary.service";
 import { UsersRepository } from "../users/users.repository";
 import { UsersService } from "../users/users.service";
 import { WalletService } from "../wallet/wallet.service";
+import { permissionsFor } from "../admin/admin-permissions";
 import { CompleteRegistrationDto } from "./dto/complete-registration.dto";
 import { LoginDto } from "./dto/login.dto";
 import { RegistrationKycState, RegistrationSession } from "./types/registration-session";
@@ -531,7 +532,14 @@ export class AuthService {
       if (adminOnly && !adminRoles.includes(user.role)) {
         throw new Error("not admin");
       }
-      return { ...payload, role: user.role, phoneNumber: user.phoneNumber };
+      if (adminOnly && user.adminProfile?.isActive === false) throw new Error("admin disabled");
+      return {
+        ...payload,
+        role: user.role,
+        phoneNumber: user.phoneNumber,
+        permissions: adminOnly ? permissionsFor(user.role, user.adminProfile?.permissions) : undefined,
+        adminActive: adminOnly ? (user.adminProfile?.isActive ?? true) : undefined
+      };
     } catch {
       throw new ApiException("Unauthorized", "UNAUTHORIZED", HttpStatus.UNAUTHORIZED);
     }
@@ -552,12 +560,30 @@ export class AuthService {
     if (!(await bcrypt.compare(passcode, user.passcodeHash))) {
       throw new ApiException("Invalid admin credentials", "INVALID_ADMIN_CREDENTIALS", HttpStatus.UNAUTHORIZED);
     }
+    if (user.adminProfile?.isActive === false) {
+      throw new ApiException("Admin account is disabled", "ADMIN_DISABLED", HttpStatus.FORBIDDEN);
+    }
+    const permissions = permissionsFor(user.role, user.adminProfile?.permissions);
     const accessToken = await this.jwt.signAsync(
-      { sub: user.id, typ: "admin_access", role: user.role },
+      { sub: user.id, typ: "admin_access", role: user.role, permissions },
       { secret: this.config.get<string>("ADMIN_JWT_SECRET"), expiresIn: this.config.get<string>("JWT_ACCESS_TTL", "15m") }
     );
+    if (user.adminProfile) {
+      await this.prisma.adminProfile.update({ where: { userId: user.id }, data: { lastLoginAt: new Date() } });
+    }
     await this.audit(user.id, "ADMIN_LOGIN", "User", user.id, {});
-    return { accessToken };
+    return {
+      accessToken,
+      admin: {
+        id: user.id,
+        phoneNumber: user.phoneNumber,
+        role: user.role,
+        permissions,
+        firstName: user.profile?.firstName,
+        lastName: user.profile?.lastName,
+        email: user.profile?.email
+      }
+    };
   }
 
   async issueMobileTokens(userId: string, meta: { ipAddress?: string; userAgent?: string }) {
