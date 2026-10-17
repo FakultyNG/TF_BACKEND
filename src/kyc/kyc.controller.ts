@@ -15,6 +15,7 @@ import {
 import { SelfieValidateDto } from "./dto/selfie-validate.dto";
 import { VerifyBvnDto } from "./dto/verify-bvn.dto";
 import { VerifyNinDto } from "./dto/verify-nin.dto";
+import { ConfirmNinOtpDto, ResendNinOtpDto } from "./dto/confirm-nin-otp.dto";
 import { KycService } from "./kyc.service";
 
 @ApiTags("KYC")
@@ -43,6 +44,22 @@ export class KycController {
   async verifyNin(@CurrentUser() user: { sub: string }, @Body() dto: VerifyNinDto) {
     const data = await this.kycService.verifyNin(user.sub, dto.nin);
     return success("NIN verified successfully", data);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post("nin/otp/confirm")
+  async confirmNinOtp(@CurrentUser() user: { sub: string }, @Body() dto: ConfirmNinOtpDto) {
+    const data = await this.kycService.confirmNinOtp(user.sub, dto.otpReference, dto.otp);
+    return success("NIN phone verification successful", data);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post("nin/otp/resend")
+  async resendNinOtp(@CurrentUser() user: { sub: string }, @Body() dto: ResendNinOtpDto) {
+    const data = await this.kycService.resendNinOtp(user.sub, dto.otpReference);
+    return success("NIN verification code sent", data);
   }
 
   @Post("bvn/liveness/start")

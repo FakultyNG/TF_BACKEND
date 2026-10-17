@@ -49,6 +49,7 @@ BYTID_BASE_URL=https://api.bytid.com/v1
 BYTID_API_KEY=
 BYTID_BVN_PATH=/identity/bvn
 BYTID_BVN_FACE_MATCH_PATH=/identity/bvn/face-match
+NIN_FACE_MATCH_THRESHOLD=50
 BYTID_LIVENESS_PATH=/liveness/sessions
 BYTID_LIVENESS_REDIRECT_URL=https://api.example.com/api/v1/kyc/bvn/liveness/return
 KYC_LIVENESS_APP_RETURN_URL=transfa://kyc/liveness-complete

@@ -2798,4 +2798,34 @@ This endpoint is restricted to `SUPER_ADMIN` and is irreversible. It hard-delete
 - Profile and authentication user objects now include `accountTier` (`citizen | captain | prime`) and `showAddMoney`.
 - `PATCH /api/v1/admin/users/:userId/profile/operational` accepts `accountTier`, in addition to the existing operational fields.
 - On the mobile Money Limits screen, an unverified Prime tier shows **Click to start**. It opens support chat with `I want to upgrade my limits to the Prime tier` prefilled for the customer to review and send. Captain and Prime controls become non-clickable **Verified** states when the user's `accountTier` reaches the corresponding tier.
+
+### NIN upgrade verification
+
+`POST /api/v1/kyc/nin/verify` verifies the NIN and applies one of two rules:
+
+- If the NIN, verified BVN and Transfa account phone numbers are identical, it returns `otpRequired: true`, `otpReference`, and `maskedPhone`. The client opens `/identity/verify-nin`.
+- Otherwise, at least two normalized names must match regardless of order and the NIN photograph must match the CashDrop/profile face at `NIN_FACE_MATCH_THRESHOLD` (minimum/default `50`). Successful verification upgrades a Citizen user to Captain.
+
+`POST /api/v1/kyc/nin/otp/confirm`
+
+```json
+{ "otpReference": "otp_ref_...", "otp": "123456" }
+```
+
+`POST /api/v1/kyc/nin/otp/resend`
+
+```json
+{ "otpReference": "otp_ref_..." }
+```
+
+After three unsuccessful NIN/OTP attempts, the error details include `supportRequired: true` and the support-chat preset.
+
+### Transaction presentation updates
+
+- Strowallet DVA-credit transactions store the sender account name, sender bank/account, provider narration, and a matching Transfa profile image when one exists.
+- Transaction list/detail responses can include `counterpartyProfileImageUrl` and `memo`.
+- The general notification badge is derived from notification receipt `isRead` state.
+- `GET /api/v1/notifications/support/unread-count` returns `{ "count": number }` for the Support app-icon badge.
+- `PATCH /api/v1/notifications/support/read-all` marks support notifications read when the user opens the support conversation.
+- Admin support-reply pushes default to `tf://support`; legacy ticket-specific support links are also routed to the same continuous conversation after app authentication.
 - Transfer quotes enforce the tier's daily send ceiling. Wallet credits enforce daily receive and maximum-balance ceilings. Defaults are configurable through `CITIZEN_*`, `CAPTAIN_*`, and `PRIME_*` environment variables.

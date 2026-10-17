@@ -1,4 +1,4 @@
-export type OtpPurpose = "registration" | "login_verification" | "passcode_reset" | "sensitive_action" | "phone_verification";
+export type OtpPurpose = "registration" | "login_verification" | "passcode_reset" | "sensitive_action" | "phone_verification" | "nin_verification";
 
 export interface SendOtpInput {
   otpReference: string;

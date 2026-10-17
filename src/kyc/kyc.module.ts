@@ -6,11 +6,12 @@ import { RedisModule } from "../redis/redis.module";
 import { WalletModule } from "../wallet/wallet.module";
 import { CashDropModule } from "../cash-drop/cash-drop.module";
 import { UploadsModule } from "../uploads/uploads.module";
+import { OtpModule } from "../otp/otp.module";
 import { KycController } from "./kyc.controller";
 import { KycService } from "./kyc.service";
 
 @Module({
-  imports: [ProvidersModule, AuthModule, RedisModule, ConfigModule, WalletModule, CashDropModule, UploadsModule],
+  imports: [ProvidersModule, AuthModule, RedisModule, ConfigModule, WalletModule, CashDropModule, UploadsModule, OtpModule],
   controllers: [KycController],
   providers: [KycService],
   exports: [KycService]

@@ -61,6 +61,33 @@ export class NotificationsService {
     return { notificationId, isRead: true };
   }
 
+  async unreadCount(userId: string, category?: string) {
+    const count = await this.prisma.notification.count({
+      where: {
+        ...this.visibleWhere(userId, { category }),
+        receipts: { none: { userId, isRead: true } }
+      }
+    });
+    return { count };
+  }
+
+  async markCategoryRead(userId: string, category: string) {
+    const notifications = await this.prisma.notification.findMany({
+      where: this.visibleWhere(userId, { category }),
+      select: { id: true }
+    });
+    await this.prisma.$transaction(
+      notifications.map((notification) =>
+        this.prisma.notificationReceipt.upsert({
+          where: { notificationId_userId: { notificationId: notification.id, userId } },
+          create: { notificationId: notification.id, userId, isRead: true, readAt: new Date() },
+          update: { isRead: true, readAt: new Date() }
+        })
+      )
+    );
+    return { updated: true, count: notifications.length };
+  }
+
   async markAllRead(userId: string) {
     const notifications = await this.prisma.notification.findMany({
       where: this.visibleWhere(userId, {}),

@@ -12,6 +12,16 @@ import { WalletService } from "../wallet/wallet.service";
 import { CashDropService } from "../cash-drop/cash-drop.service";
 import { CloudinaryService } from "../uploads/cloudinary.service";
 import { AdminUpdateKycDto } from "../admin/dto/admin-update-kyc.dto";
+import { OtpService } from "../otp/otp.service";
+import { NinVerificationResult } from "../providers/interfaces/kyc-provider.interface";
+
+type PendingNinVerification = {
+  userId: string;
+  recordId: string;
+  ninHash: string;
+  result: NinVerificationResult;
+  phoneNumber: string;
+};
 
 @Injectable()
 export class KycService {
@@ -22,6 +32,7 @@ export class KycService {
     private readonly walletService: WalletService,
     private readonly cashDropService: CashDropService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly otpService: OtpService,
     @Inject(KYC_PROVIDER) private readonly kycProvider: KycProvider,
     @Inject(SELFIE_KYC_PROVIDER) private readonly selfieKycProvider: KycProvider
   ) {}
@@ -223,19 +234,122 @@ export class KycService {
       reference
     });
     if (!result.ninVerified) {
-      throw new ApiException("NIN could not be verified", "NIN_NOT_VERIFIED", HttpStatus.UNPROCESSABLE_ENTITY);
+      await this.throwNinFailure(userId, "NIN could not be verified", "NIN_NOT_VERIFIED");
     }
+    const phoneMatches = samePhone(user.phoneNumber, record.phoneNumber, result.phoneNumber);
+    if (phoneMatches) {
+      const challenge = await this.otpService.sendOtp(user.phoneNumber, "nin_verification");
+      const pending: PendingNinVerification = {
+        userId,
+        recordId: record.id,
+        ninHash,
+        result,
+        phoneNumber: user.phoneNumber
+      };
+      await this.redis.setJson(
+        `nin-pending:${userId}:${challenge.otpReference}`,
+        pending,
+        Number(this.config.get<string>("OTP_TTL_SECONDS", "300"))
+      );
+      return {
+        ninVerified: false,
+        otpRequired: true,
+        otpReference: challenge.otpReference,
+        maskedPhone: maskPhone(user.phoneNumber)
+      };
+    }
+
+    const accountName = [user.profile?.firstName, user.profile?.lastName].filter(Boolean).join(" ");
+    const ninName = [result.firstName, result.middleName, result.lastName].filter(Boolean).join(" ");
+    const namesMatch = atLeastTwoNamesMatch(accountName, ninName);
+    const configuredThreshold = Number(this.config.get<string>("NIN_FACE_MATCH_THRESHOLD", "50"));
+    const faceThreshold = Number.isFinite(configuredThreshold)
+      ? Math.min(100, Math.max(50, configuredThreshold))
+      : 50;
+    const face = user.profile?.profileImageUrl && result.imageUrl
+      ? await this.cashDropService.matchProfileImages(user.profile.profileImageUrl, result.imageUrl, faceThreshold)
+      : { matched: false, confidence: 0, threshold: faceThreshold };
+    if (!namesMatch || !face.matched) {
+      await this.throwNinFailure(
+        userId,
+        !namesMatch ? "The NIN name does not match this Transfa account" : "The NIN photograph does not match the account face shot",
+        !namesMatch ? "NIN_NAME_MISMATCH" : "NIN_FACE_MISMATCH",
+        { namesMatch, faceMatch: face.matched, confidence: face.confidence, threshold: face.threshold }
+      );
+    }
+    return this.completeNinVerification(userId, record.id, ninHash, result, user.accountTier, user.profile?.email);
+  }
+
+  async confirmNinOtp(userId: string, otpReference: string, otp: string) {
+    const key = `nin-pending:${userId}:${otpReference}`;
+    const pending = await this.redis.getJson<PendingNinVerification>(key);
+    if (!pending || pending.userId !== userId) {
+      throw new ApiException("NIN verification session expired", "NIN_OTP_SESSION_EXPIRED", HttpStatus.BAD_REQUEST);
+    }
+    try {
+      await this.otpService.validateOtp(pending.phoneNumber, otp, otpReference);
+      await this.otpService.consumeValidatedOtp(otpReference, pending.phoneNumber, "nin_verification");
+    } catch (error) {
+      if (error instanceof ApiException && ["OTP_INVALID", "OTP_TOO_MANY_ATTEMPTS"].includes(error.code)) {
+        await this.throwNinFailure(userId, error.message, error.code);
+      }
+      throw error;
+    }
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { profile: true } });
+    if (!user) throw new ApiException("User not found", "USER_NOT_FOUND", HttpStatus.NOT_FOUND);
+    await this.redis.del(key);
+    return this.completeNinVerification(
+      userId,
+      pending.recordId,
+      pending.ninHash,
+      pending.result,
+      user.accountTier,
+      user.profile?.email
+    );
+  }
+
+  async resendNinOtp(userId: string, otpReference: string) {
+    const oldKey = `nin-pending:${userId}:${otpReference}`;
+    const pending = await this.redis.getJson<PendingNinVerification>(oldKey);
+    if (!pending || pending.userId !== userId) {
+      throw new ApiException("NIN verification session expired", "NIN_OTP_SESSION_EXPIRED", HttpStatus.BAD_REQUEST);
+    }
+    const challenge = await this.otpService.resendOtp(pending.phoneNumber, otpReference);
+    await Promise.all([
+      this.redis.del(oldKey),
+      this.redis.setJson(
+        `nin-pending:${userId}:${challenge.otpReference}`,
+        pending,
+        Number(this.config.get<string>("OTP_TTL_SECONDS", "300"))
+      )
+    ]);
+    return { ...challenge, maskedPhone: maskPhone(pending.phoneNumber) };
+  }
+
+  private async completeNinVerification(
+    userId: string,
+    recordId: string,
+    ninHash: string,
+    result: NinVerificationResult,
+    currentTier: string,
+    existingEmail?: string | null
+  ) {
+    const [record, profile] = await Promise.all([
+      this.prisma.kycRecord.findUnique({ where: { id: recordId }, select: { metadata: true } }),
+      this.prisma.profile.findUnique({ where: { userId }, select: { profileImageUrl: true } })
+    ]);
+    if (!record) throw new ApiException("KYC record not found", "KYC_RECORD_NOT_FOUND", HttpStatus.NOT_FOUND);
     const providerLogId = await this.logKycProvider(
       result.provider,
       "kyc_nin_verify",
-      reference,
+      result.providerReference ?? recordId,
       result.providerReference,
       "success",
       result.rawProviderResponse
     );
     await this.prisma.$transaction([
       this.prisma.kycRecord.update({
-        where: { id: record.id },
+        where: { id: recordId },
         data: {
           ninHash,
           ninMasked: result.ninMasked,
@@ -249,19 +363,31 @@ export class KycService {
       }),
       this.prisma.user.update({
         where: { id: userId },
-        data: { accountTier: user.accountTier === "prime" ? "prime" : "captain" }
+        data: { accountTier: currentTier === "prime" ? "prime" : "captain" }
       }),
       this.prisma.auditLog.create({
-        data: { actorId: userId, actorType: "user", action: "NIN_VERIFIED_TIER_UPGRADED", entityType: "KycRecord", entityId: record.id, metadata: { accountTier: user.accountTier === "prime" ? "prime" : "captain" } }
+        data: { actorId: userId, actorType: "user", action: "NIN_VERIFIED_TIER_UPGRADED", entityType: "KycRecord", entityId: recordId, metadata: { accountTier: currentTier === "prime" ? "prime" : "captain" } }
       })
     ]);
+    await this.redis.del(`nin-failures:${userId}`);
     return {
       ninVerified: true,
       ninMasked: result.ninMasked,
-      accountTier: user.accountTier === "prime" ? "prime" : "captain",
-      email: user.profile?.email ?? result.email ?? null,
-      profileImageUrl: user.profile?.profileImageUrl ?? null
+      otpRequired: false,
+      accountTier: currentTier === "prime" ? "prime" : "captain",
+      email: existingEmail ?? result.email ?? null,
+      profileImageUrl: profile?.profileImageUrl ?? null
     };
+  }
+
+  private async throwNinFailure(userId: string, message: string, code: string, details: Record<string, unknown> = {}): Promise<never> {
+    const attempts = await this.redis.incrementWithTtl(`nin-failures:${userId}`, 60 * 60 * 24);
+    throw new ApiException(message, code, HttpStatus.UNPROCESSABLE_ENTITY, {
+      ...details,
+      attempts,
+      supportRequired: attempts >= 3,
+      supportMessage: attempts >= 3 ? "I need help upgrading my limit to captain tier" : undefined
+    });
   }
 
   async getStatus(userId: string) {
@@ -444,6 +570,41 @@ export class KycService {
       };
     }
   }
+}
+
+function atLeastTwoNamesMatch(first: string, second: string) {
+  const left = nameTokens(first);
+  const right = new Set(nameTokens(second));
+  return left.filter((token) => right.has(token)).length >= 2;
+}
+
+function nameTokens(value: string) {
+  return [...new Set(
+    value
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]/g, " ")
+      .split(/\s+/)
+      .filter((token) => token.length > 1)
+  )];
+}
+
+function samePhone(...values: Array<string | null | undefined>) {
+  const normalized = values.map(canonicalPhone);
+  return normalized.every(Boolean) && new Set(normalized).size === 1;
+}
+
+function canonicalPhone(value?: string | null) {
+  if (!value) return "";
+  let digits = value.replace(/\D/g, "");
+  if (digits.startsWith("0") && digits.length === 11) digits = `234${digits.slice(1)}`;
+  return digits;
+}
+
+function maskPhone(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return digits.length <= 4 ? "****" : `${"*".repeat(digits.length - 4)}${digits.slice(-4)}`;
 }
 
 function parseProviderDate(value?: string) {

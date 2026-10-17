@@ -21,6 +21,18 @@ export class NotificationsController {
     return success("Notifications fetched successfully", data);
   }
 
+  @Get("support/unread-count")
+  async supportUnreadCount(@CurrentUser() user: { sub: string }) {
+    const data = await this.notificationsService.unreadCount(user.sub, "support");
+    return success("Unread support notifications fetched successfully", data);
+  }
+
+  @Patch("support/read-all")
+  async readAllSupport(@CurrentUser() user: { sub: string }) {
+    const data = await this.notificationsService.markCategoryRead(user.sub, "support");
+    return success("Support notifications marked as read successfully", data);
+  }
+
   @Post("device-token/register")
   async registerDeviceToken(@CurrentUser() user: { sub: string }, @Body() dto: RegisterDeviceTokenDto) {
     const data = await this.notificationsService.registerDeviceToken(user.sub, dto);

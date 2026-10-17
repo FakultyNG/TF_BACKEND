@@ -90,6 +90,7 @@ export class StrowalletWebhookService {
     });
     if (!dva) return { ignored: true, message: "Virtual account could not be matched" };
 
+    const sender = await this.inboundSender(payload);
     const reference = event.internalReference ?? event.providerReference ?? `strowallet_funding_${Date.now()}`;
     const result = await this.walletService.creditWallet({
       userId: dva.userId,
@@ -99,10 +100,18 @@ export class StrowalletWebhookService {
       reference,
       provider: this.provider,
       providerReference: event.providerReference,
-      description: "Wallet funding confirmed by Strowallet webhook",
+      description: sender.name || "Bank transfer",
+      narration: sender.memo,
       idempotencyKey: `webhook:${this.provider}:funding:${event.providerReference ?? reference}`,
       entryType: LedgerEntryType.credit,
-      metadata: this.logs.toJson(this.logs.sanitize(payload))
+      metadata: this.logs.toJson({
+        accountName: sender.name,
+        accountNumber: sender.accountNumber,
+        bankName: sender.bankName,
+        memo: sender.memo,
+        counterpartyProfileImageUrl: sender.profileImageUrl,
+        providerPayload: this.logs.sanitize(payload)
+      })
     });
     await this.logs.notifyUser({
       userId: dva.userId,
@@ -112,6 +121,56 @@ export class StrowalletWebhookService {
       type: "wallet_funding"
     });
     return { entityType: "Transaction", entityId: result.transaction.id };
+  }
+
+  private async inboundSender(payload: unknown) {
+    const body = asRecord(payload);
+    const data = asRecord(body.data);
+    const name = firstString(
+      body.senderAccountName,
+      body.sender_account_name,
+      body.senderName,
+      body.originatorName,
+      body.accountName,
+      data.senderAccountName,
+      data.sender_name,
+      data.originatorName
+    ) ?? "Bank transfer";
+    const memo = firstString(
+      body.narration,
+      body.memo,
+      body.description,
+      body.paymentReference,
+      data.narration,
+      data.memo,
+      data.description
+    ) ?? "Bank transfer";
+    const bankName = firstString(
+      body.senderBankName,
+      body.sender_bank_name,
+      body.originatorBank,
+      body.bankName,
+      data.senderBankName,
+      data.originatorBank
+    );
+    const accountNumber = firstString(
+      body.senderAccountNumber,
+      body.sender_account_number,
+      body.originatorAccountNumber,
+      data.senderAccountNumber,
+      data.originatorAccountNumber
+    );
+    const normalized = normalizedName(name);
+    const profiles = this.prisma.profile
+      ? await this.prisma.profile.findMany({
+          where: { profileImageUrl: { not: null } },
+          select: { firstName: true, lastName: true, profileImageUrl: true }
+        })
+      : [];
+    const matchingProfile = profiles.find((profile) =>
+      normalizedName([profile.firstName, profile.lastName].filter(Boolean).join(" ")) === normalized
+    );
+    return { name, memo, bankName, accountNumber, profileImageUrl: matchingProfile?.profileImageUrl };
   }
 
   private async handleBankTransfer(event: NormalizedWebhookEvent) {
@@ -196,4 +255,12 @@ export class StrowalletWebhookService {
       data: { actorType: "system", action: "WEBHOOK_PROCESSING_FAILED", entityType: "WebhookLog", entityId: logId, metadata: { provider: this.provider, eventType: event.eventType, message } }
     });
   }
+}
+
+function normalizedName(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }

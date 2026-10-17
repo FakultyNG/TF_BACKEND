@@ -273,6 +273,20 @@ export class CashDropService {
     }
   }
 
+  async matchProfileImages(firstImageUrl: string, secondImageUrl: string, threshold = 50) {
+    const safeThreshold = Number.isFinite(threshold) ? Math.min(100, Math.max(0, threshold)) : 50;
+    try {
+      const [first, second] = await Promise.all([
+        this.fingerprintService.fingerprintFromImageUrl(firstImageUrl),
+        this.fingerprintService.fingerprintFromImageUrl(secondImageUrl)
+      ]);
+      const confidence = this.fingerprintService.compare(first.fingerprint, second.fingerprint);
+      return { matched: confidence >= safeThreshold, confidence, threshold: safeThreshold };
+    } catch {
+      return { matched: false, confidence: 0, threshold: safeThreshold };
+    }
+  }
+
   private enforceEnabled() {
     if (!this.isEnabled()) {
       throw new ApiException("CashDrop is disabled", "CASH_DROP_DISABLED", HttpStatus.FORBIDDEN);

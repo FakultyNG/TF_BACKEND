@@ -308,7 +308,7 @@ export class SupportService {
       audience: NotificationAudience.specific_user,
       targetUserId: ticket.userId,
       status: NotificationStatus.published,
-      deepLink: `tf://support/tickets/${ticketId}`
+      deepLink: "tf://support"
     });
     return { ticketId, messageId: message.id, status: SupportTicketStatus.pending };
   }

@@ -106,7 +106,10 @@ export class TransactionsService {
       counterpartyName: typeof value.accountName === "string" ? value.accountName : undefined,
       counterpartyAccount: typeof value.accountNumber === "string" ? value.accountNumber : undefined,
       bankName: typeof value.bankName === "string" ? value.bankName : undefined,
-      bankCode: typeof value.bankCode === "string" ? value.bankCode : undefined
+      bankCode: typeof value.bankCode === "string" ? value.bankCode : undefined,
+      counterpartyProfileImageUrl:
+        typeof value.counterpartyProfileImageUrl === "string" ? value.counterpartyProfileImageUrl : undefined,
+      memo: typeof value.memo === "string" ? value.memo : undefined
     };
   }
 }
