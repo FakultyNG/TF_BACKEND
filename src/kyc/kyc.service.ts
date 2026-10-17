@@ -11,6 +11,7 @@ import { RedisService } from "../redis/redis.service";
 import { WalletService } from "../wallet/wallet.service";
 import { CashDropService } from "../cash-drop/cash-drop.service";
 import { CloudinaryService } from "../uploads/cloudinary.service";
+import { AdminUpdateKycDto } from "../admin/dto/admin-update-kyc.dto";
 
 @Injectable()
 export class KycService {
@@ -303,6 +304,81 @@ export class KycService {
       }
     });
     return record;
+  }
+
+  async adminUpdateRecord(adminId: string, id: string, dto: AdminUpdateKycDto) {
+    const existing = await this.prisma.kycRecord.findUnique({
+      where: { id },
+      include: { user: { select: { status: true } } }
+    });
+    if (!existing) {
+      throw new ApiException("KYC record not found", "KYC_RECORD_NOT_FOUND", HttpStatus.NOT_FOUND);
+    }
+
+    const dateOfBirth = dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined;
+    const profileFields = {
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      email: dto.email,
+      dateOfBirth,
+      gender: dto.gender,
+      country: dto.country
+    };
+    const changedFields = Object.entries(dto).filter(([, value]) => value !== undefined).map(([key]) => key);
+    const syncProfile = dto.syncProfile !== false && Object.values(profileFields).some((value) => value !== undefined);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.kycRecord.update({
+        where: { id },
+        data: {
+          status: dto.status,
+          bvnVerified: dto.bvnVerified,
+          selfieVerified: dto.selfieVerified,
+          faceMatch: dto.faceMatch,
+          confidenceScore: dto.confidenceScore,
+          firstName: dto.firstName,
+          middleName: dto.middleName,
+          lastName: dto.lastName,
+          email: dto.email,
+          phoneNumber: dto.phoneNumber,
+          dateOfBirth,
+          gender: dto.gender,
+          country: dto.country,
+          verifiedAt: dto.status === undefined ? undefined : dto.status === KycStatus.verified ? new Date() : null
+        }
+      });
+      if (syncProfile) {
+        await tx.profile.upsert({
+          where: { userId: existing.userId },
+          create: { userId: existing.userId, ...profileFields },
+          update: profileFields
+        });
+      }
+      if (dto.status !== undefined) {
+        await tx.user.update({
+          where: { id: existing.userId },
+          data: {
+            walletStatus:
+              dto.status === KycStatus.verified && existing.user.status === "active" ? "active" : "inactive"
+          }
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          actorId: adminId,
+          actorType: "admin",
+          action: "ADMIN_KYC_RECORD_UPDATED",
+          entityType: "KycRecord",
+          entityId: id,
+          metadata: { changedFields, syncProfile }
+        }
+      });
+    });
+
+    return this.prisma.kycRecord.findUnique({
+      where: { id },
+      include: { user: { select: { id: true, phoneNumber: true, status: true, walletStatus: true, accountTier: true } } }
+    });
   }
 
   private async logKycProvider(

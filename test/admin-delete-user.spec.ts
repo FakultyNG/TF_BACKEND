@@ -1,83 +1,77 @@
-import { AuthSessionStatus, CashDropProfileStatus, DvaStatus, UserStatus, WalletStatus } from "@prisma/client";
+import { UserRole } from "@prisma/client";
 import { AdminService } from "../src/admin/admin.service";
 
-describe("admin user deletion", () => {
-  function makeService(user: { id: string; status: UserStatus } | null = { id: "user_1", status: UserStatus.active }) {
+describe("admin permanent user deletion", () => {
+  const user = {
+    id: "user_1",
+    role: UserRole.USER,
+    phoneNumber: "2348012345678",
+    _count: { transactions: 2, kycRecords: 1, supportTickets: 1 },
+    kycRecords: [{ rawProviderLogId: "provider_log_1" }]
+  };
+
+  function makeService(existing: typeof user | null = user) {
     const prisma = {
       user: {
-        findUnique: jest.fn().mockResolvedValue(user),
-        update: jest.fn().mockResolvedValue({ id: "user_1", status: UserStatus.disabled })
+        findUnique: jest.fn().mockResolvedValue(existing),
+        delete: jest.fn().mockResolvedValue({ id: "user_1" })
       },
-      authSession: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
-      userDeviceToken: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      trustedDevice: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      dedicatedVirtualAccount: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      cashDropProfile: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      auditLog: { create: jest.fn().mockResolvedValue({}) },
-      $transaction: jest.fn((operations: Array<Promise<unknown>>) => Promise.all(operations))
+      cashDropProfile: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      providerLog: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      securityAudit: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      auditLog: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }), create: jest.fn().mockResolvedValue({}) },
+      $transaction: jest.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma))
     };
-    const service = new AdminService(prisma as never, {} as never);
-    return { service, prisma };
+    return { service: new AdminService(prisma as never, {} as never), prisma };
   }
 
-  it("soft-deletes a user and revokes active access surfaces", async () => {
+  it("hard-deletes a confirmed customer and linked provider logs", async () => {
     const { service, prisma } = makeService();
 
-    await expect(service.deleteUser("admin_1", "user_1", "fraud")).resolves.toEqual({
-      deleted: true,
-      userId: "user_1",
-      status: UserStatus.disabled
-    });
+    await expect(service.deleteUser("admin_1", "user_1", {
+      reason: "Customer requested erasure",
+      confirmation: "DELETE 2348012345678"
+    })).resolves.toEqual({ deleted: true, permanent: true, userId: "user_1" });
 
-    expect(prisma.user.update).toHaveBeenCalledWith({
-      where: { id: "user_1" },
-      data: { status: UserStatus.disabled, walletStatus: WalletStatus.inactive }
+    expect(prisma.cashDropProfile.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
+    expect(prisma.securityAudit.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_1" } });
+    expect(prisma.auditLog.deleteMany).toHaveBeenCalledWith({
+      where: { OR: [{ actorId: "user_1" }, { entityType: "User", entityId: "user_1" }] }
     });
-    expect(prisma.authSession.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user_1", status: AuthSessionStatus.active },
-      data: { status: AuthSessionStatus.revoked, revokedAt: expect.any(Date) }
-    });
-    expect(prisma.userDeviceToken.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user_1", isActive: true },
-      data: { isActive: false }
-    });
-    expect(prisma.trustedDevice.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user_1", enabled: true },
-      data: { enabled: false, disabledAt: expect.any(Date) }
-    });
-    expect(prisma.dedicatedVirtualAccount.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user_1", status: DvaStatus.active },
-      data: { status: DvaStatus.inactive }
-    });
-    expect(prisma.cashDropProfile.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user_1", status: CashDropProfileStatus.active },
-      data: { status: CashDropProfileStatus.disabled, disabledAt: expect.any(Date) }
-    });
+    expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: "user_1" } });
+    expect(prisma.providerLog.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["provider_log_1"] } } });
     expect(prisma.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         actorId: "admin_1",
-        actorType: "admin",
-        action: "ADMIN_USER_DELETED",
-        entityType: "User",
+        action: "ADMIN_USER_PERMANENTLY_DELETED",
         entityId: "user_1",
-        metadata: { reason: "fraud", softDelete: true }
+        metadata: expect.objectContaining({ hardDelete: true, reason: "Customer requested erasure" })
       })
     });
   });
 
+  it("rejects an incorrect permanent-delete confirmation", async () => {
+    const { service, prisma } = makeService();
+    await expect(service.deleteUser("admin_1", "user_1", {
+      reason: "Customer requested erasure",
+      confirmation: "DELETE user_1"
+    })).rejects.toMatchObject({ code: "USER_DELETE_CONFIRMATION_INVALID" });
+    expect(prisma.user.delete).not.toHaveBeenCalled();
+  });
+
   it("rejects deleting a missing user", async () => {
     const { service } = makeService(null);
-
-    await expect(service.deleteUser("admin_1", "missing")).rejects.toMatchObject({
-      code: "USER_NOT_FOUND"
-    });
+    await expect(service.deleteUser("admin_1", "missing", {
+      reason: "Requested erasure",
+      confirmation: "DELETE 2348012345678"
+    })).rejects.toMatchObject({ code: "USER_NOT_FOUND" });
   });
 
   it("rejects an admin deleting their own account", async () => {
-    const { service } = makeService({ id: "admin_1", status: UserStatus.active });
-
-    await expect(service.deleteUser("admin_1", "admin_1")).rejects.toMatchObject({
-      code: "ADMIN_CANNOT_DELETE_SELF"
-    });
+    const { service } = makeService();
+    await expect(service.deleteUser("admin_1", "admin_1", {
+      reason: "Requested erasure",
+      confirmation: "DELETE 2348012345678"
+    })).rejects.toMatchObject({ code: "ADMIN_CANNOT_DELETE_SELF" });
   });
 });

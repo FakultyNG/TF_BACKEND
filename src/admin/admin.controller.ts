@@ -15,10 +15,14 @@ import { GiftCardsService } from "../gift-cards/gift-cards.service";
 import { PricingService } from "../pricing/pricing.service";
 import { FeeConfigKey } from "../pricing/pricing.types";
 import { AdminDvaQueryDto } from "./dto/admin-dva-query.dto";
+import { AdminDeleteUserDto } from "./dto/admin-delete-user.dto";
 import { AdminKycRecordQueryDto } from "./dto/admin-kyc-record-query.dto";
 import { AdminPaginationDto } from "./dto/admin-pagination.dto";
 import { AdminReasonDto } from "./dto/admin-reason.dto";
 import { AdminTransactionQueryDto } from "./dto/admin-transaction-query.dto";
+import { AdminUpdateKycDto } from "./dto/admin-update-kyc.dto";
+import { AdminUpdateUserDto } from "./dto/admin-update-user.dto";
+import { AdminUpdateUserStatusDto } from "./dto/admin-update-user-status.dto";
 import { AdminLoginDto } from "./dto/admin-login.dto";
 import { UpdateKycStatusDto } from "./dto/update-kyc-status.dto";
 import { UpdateFeeConfigDto } from "./dto/update-fee-config.dto";
@@ -66,11 +70,29 @@ export class AdminController {
 
   @ApiBearerAuth()
   @UseGuards(AdminJwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.COMPLIANCE, UserRole.SUPER_ADMIN)
+  @Patch("users/:userId")
+  async updateUser(@CurrentUser() admin: { sub: string }, @Param("userId") userId: string, @Body() dto: AdminUpdateUserDto) {
+    const data = await this.adminService.updateUser(admin.sub, userId, dto);
+    return success("User details updated successfully", data);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(AdminJwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.COMPLIANCE, UserRole.SUPER_ADMIN)
+  @Patch("users/:userId/status")
+  async updateUserStatus(@CurrentUser() admin: { sub: string }, @Param("userId") userId: string, @Body() dto: AdminUpdateUserStatusDto) {
+    const data = await this.adminService.updateUserStatus(admin.sub, userId, dto);
+    return success("User status updated successfully", data);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(AdminJwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
   @Delete("users/:userId")
-  async deleteUser(@CurrentUser() admin: { sub: string }, @Param("userId") userId: string, @Body() dto: AdminReasonDto) {
-    const data = await this.adminService.deleteUser(admin.sub, userId, dto.reason);
-    return success("User deleted successfully", data);
+  async deleteUser(@CurrentUser() admin: { sub: string }, @Param("userId") userId: string, @Body() dto: AdminDeleteUserDto) {
+    const data = await this.adminService.deleteUser(admin.sub, userId, dto);
+    return success("User permanently deleted successfully", data);
   }
 
   @ApiBearerAuth()
@@ -90,6 +112,15 @@ export class AdminController {
   async updateKyc(@CurrentUser() admin: { sub: string }, @Param("id") id: string, @Body() dto: UpdateKycStatusDto) {
     const data = await this.kycService.updateStatus(admin.sub, id, dto.status);
     return success("KYC status updated successfully", data);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(AdminJwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.COMPLIANCE, UserRole.SUPER_ADMIN)
+  @Patch("kyc-records/:id")
+  async updateKycRecord(@CurrentUser() admin: { sub: string }, @Param("id") id: string, @Body() dto: AdminUpdateKycDto) {
+    const data = await this.kycService.adminUpdateRecord(admin.sub, id, dto);
+    return success("KYC record updated successfully", data);
   }
 
   @ApiBearerAuth()

@@ -2693,27 +2693,43 @@ Admin endpoints require admin JWT:
 Authorization: Bearer admin_access_token
 ```
 
-## Delete User
+## Update User Details
+
+`PATCH /admin/users/:userId`
+
+Requires `users.manage`. Supports `phoneNumber`, `firstName`, `lastName`, `email`, `dateOfBirth`, `gender`, `country`, `profileImageUrl`, `accountTier`, `walletStatus`, `supportNotes`, and `riskNotes`. Phone numbers are normalized and remain globally unique. Every update is audit logged without copying the edited PII into the audit payload.
+
+## Suspend, Disable, or Restore User
+
+`PATCH /admin/users/:userId/status`
+
+```json
+{
+  "status": "suspended",
+  "reason": "Manual compliance review"
+}
+```
+
+Supported statuses are `active`, `suspended`, and `disabled`. Suspending or disabling revokes active sessions, device tokens and trusted devices, and deactivates wallet, DVA and CashDrop access. Restoring a KYC-verified customer reactivates their internal wallet, inactive DVA, and disabled CashDrop payment profile; the device must authenticate and register notification/biometric credentials again.
+
+## Update KYC Record
+
+`PATCH /admin/kyc-records/:kycRecordId`
+
+Requires `kyc.manage`. Supports `status`, `bvnVerified`, `selfieVerified`, `faceMatch`, `confidenceScore`, identity fields, and `syncProfile`. When `syncProfile` is not `false`, edited identity fields are also copied to the customer's profile. Changing KYC status to `verified` activates the wallet; any other KYC status makes the wallet inactive. Raw BVN/NIN values and their hashes are not editable from the dashboard.
+
+## Permanently Delete User
 
 `DELETE /admin/users/:userId`
 
-This endpoint is restricted to `SUPER_ADMIN`.
-
-Deletion is a backend soft delete. The backend does not hard-delete the user row or financial history. It:
-- sets `user.status = disabled`
-- sets `user.walletStatus = inactive`
-- revokes active auth sessions
-- deactivates FCM device tokens
-- disables trusted biometric devices
-- inactivates active DVA records
-- disables CashDrop profile
-- writes an admin audit log
+This endpoint is restricted to `SUPER_ADMIN` and is irreversible. It hard-deletes the user row and database records connected by cascade, including profile, KYC, wallet, ledger, transactions, DVA, CashDrop, sessions, devices, notifications, beneficiaries, purchases, and support history. Linked KYC provider logs, security audits, and prior audit entries directly identifying the user are deleted explicitly. A new minimal administrator deletion audit entry remains and does not retain the deleted customer's phone number or identity fields.
 
 ### Request
 
 ```json
 {
-  "reason": "User requested account deletion"
+  "reason": "User requested account deletion",
+  "confirmation": "DELETE 2348012345678"
 }
 ```
 
@@ -2726,7 +2742,7 @@ Deletion is a backend soft delete. The backend does not hard-delete the user row
   "data": {
     "deleted": true,
     "userId": "usr_12345",
-    "status": "disabled"
+    "permanent": true
   }
 }
 ```
@@ -2746,9 +2762,9 @@ Deletion is a backend soft delete. The backend does not hard-delete the user row
 ```json
 {
   "success": false,
-  "message": "Admin cannot delete their own account",
+  "message": "Type DELETE 2348012345678 to confirm permanent deletion",
   "error": {
-    "code": "ADMIN_CANNOT_DELETE_SELF"
+    "code": "USER_DELETE_CONFIRMATION_INVALID"
   }
 }
 ```
@@ -2781,4 +2797,5 @@ Deletion is a backend soft delete. The backend does not hard-delete the user row
 - `POST /api/v1/wallet/add-money/clicked` (Bearer auth): permanently records the first Add Money click for the account and returns `{ "showAddMoney": false, "addMoneyClickedAt": "..." }`.
 - Profile and authentication user objects now include `accountTier` (`citizen | captain | prime`) and `showAddMoney`.
 - `PATCH /api/v1/admin/users/:userId/profile/operational` accepts `accountTier`, in addition to the existing operational fields.
+- On the mobile Money Limits screen, an unverified Prime tier shows **Click to start**. It opens support chat with `I want to upgrade my limits to the Prime tier` prefilled for the customer to review and send. Captain and Prime controls become non-clickable **Verified** states when the user's `accountTier` reaches the corresponding tier.
 - Transfer quotes enforce the tier's daily send ceiling. Wallet credits enforce daily receive and maximum-balance ceilings. Defaults are configurable through `CITIZEN_*`, `CAPTAIN_*`, and `PRIME_*` environment variables.

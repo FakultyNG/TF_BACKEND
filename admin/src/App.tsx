@@ -112,7 +112,7 @@ function Shell({ admin, onLogout }: { admin: Admin; onLogout: () => void }) {
   const navigate = (next: Section) => { location.hash = next; setSection(next); setMobileNav(false); };
   const page: Record<Section, ReactNode> = {
     dashboard: <DashboardPage />,
-    users: <UsersPage canManage={can("users.manage")} />,
+    users: <UsersPage canManage={can("users.manage")} canManageKyc={can("kyc.manage")} canDelete={admin.role === "SUPER_ADMIN"} />,
     transactions: <TransactionsPage />,
     support: <SupportPage canReply={can("support.reply")} />,
     notifications: <NotificationsPage canSend={can("notifications.send")} />,

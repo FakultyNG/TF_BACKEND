@@ -15,7 +15,33 @@ export type Profile = {
   firstName?: string | null;
   lastName?: string | null;
   email?: string | null;
+  dateOfBirth?: string | null;
+  gender?: string | null;
+  country?: string | null;
   profileImageUrl?: string | null;
+};
+
+export type KycRecord = {
+  id: string;
+  status: "not_started" | "pending" | "bvn_verified" | "verified" | "rejected";
+  provider?: string | null;
+  providerReference?: string | null;
+  bvnMasked?: string | null;
+  ninMasked?: string | null;
+  bvnVerified: boolean;
+  selfieVerified: boolean;
+  faceMatch: boolean;
+  confidenceScore?: number | string | null;
+  firstName?: string | null;
+  middleName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  phoneNumber?: string | null;
+  dateOfBirth?: string | null;
+  gender?: string | null;
+  country?: string | null;
+  verifiedAt?: string | null;
+  createdAt?: string;
 };
 
 export type User = {
@@ -24,9 +50,13 @@ export type User = {
   status: string;
   walletStatus: string;
   accountTier: "citizen" | "captain" | "prime";
+  role?: string;
+  supportNotes?: string | null;
+  riskNotes?: string | null;
+  addMoneyClickedAt?: string | null;
   createdAt: string;
   profile?: Profile | null;
-  kycRecords?: Array<{ status: string }>;
+  kycRecords?: KycRecord[];
 };
 
 export type Transaction = {

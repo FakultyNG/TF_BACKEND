@@ -6,6 +6,9 @@ import { PrismaService } from "../prisma/prisma.service";
 import { UsersRepository } from "../users/users.repository";
 import { normalizePhoneNumber } from "../common/utils/phone.util";
 import { ADMIN_PERMISSIONS, permissionsFor } from "./admin-permissions";
+import { AdminDeleteUserDto } from "./dto/admin-delete-user.dto";
+import { AdminUpdateUserDto } from "./dto/admin-update-user.dto";
+import { AdminUpdateUserStatusDto } from "./dto/admin-update-user-status.dto";
 import { CreateAdminDto } from "./dto/create-admin.dto";
 import { UpdateAdminDto } from "./dto/update-admin.dto";
 
@@ -17,11 +20,152 @@ export class AdminService {
   ) {}
 
   listUsers(take = 50, skip = 0) {
-    return this.usersRepository.listUsers({ take, skip });
+    return this.usersRepository.listUsers({ take, skip, role: UserRole.USER });
   }
 
-  getUser(id: string) {
-    return this.usersRepository.findById(id);
+  async getUser(id: string) {
+    const user = await this.usersRepository.findById(id);
+    if (!user || user.role !== UserRole.USER) {
+      throw new ApiException("User not found", "USER_NOT_FOUND", HttpStatus.NOT_FOUND);
+    }
+    return user;
+  }
+
+  async updateUser(adminId: string, userId: string, dto: AdminUpdateUserDto) {
+    const existing = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true, phoneNumber: true, status: true }
+    });
+    if (!existing || existing.role !== UserRole.USER) {
+      throw new ApiException("User not found", "USER_NOT_FOUND", HttpStatus.NOT_FOUND);
+    }
+
+    const phoneNumber = dto.phoneNumber ? normalizePhoneNumber(dto.phoneNumber) : undefined;
+    if (phoneNumber && phoneNumber !== existing.phoneNumber) {
+      const duplicate = await this.prisma.user.findUnique({ where: { phoneNumber }, select: { id: true } });
+      if (duplicate) {
+        throw new ApiException("Phone number is already registered", "PHONE_ALREADY_REGISTERED", HttpStatus.CONFLICT);
+      }
+    }
+    if (dto.walletStatus === WalletStatus.active && existing.status !== UserStatus.active) {
+      throw new ApiException(
+        "Restore the customer account before activating its wallet",
+        "USER_NOT_ACTIVE",
+        HttpStatus.CONFLICT
+      );
+    }
+
+    const profileFields = {
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      email: dto.email,
+      dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
+      gender: dto.gender,
+      country: dto.country,
+      profileImageUrl: dto.profileImageUrl
+    };
+    const profileChanged = Object.values(profileFields).some((value) => value !== undefined);
+    const changedFields = Object.entries(dto).filter(([, value]) => value !== undefined).map(([key]) => key);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          phoneNumber,
+          accountTier: dto.accountTier,
+          walletStatus: dto.walletStatus,
+          supportNotes: dto.supportNotes,
+          riskNotes: dto.riskNotes
+        }
+      });
+      if (profileChanged) {
+        await tx.profile.upsert({
+          where: { userId },
+          create: { userId, ...profileFields },
+          update: profileFields
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          actorId: adminId,
+          actorType: "admin",
+          action: "ADMIN_USER_DETAILS_UPDATED",
+          entityType: "User",
+          entityId: userId,
+          metadata: { changedFields }
+        }
+      });
+    });
+    return this.getUser(userId);
+  }
+
+  async updateUserStatus(adminId: string, userId: string, dto: AdminUpdateUserStatusDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        role: true,
+        status: true,
+        kycRecords: { select: { status: true }, orderBy: { createdAt: "desc" }, take: 1 }
+      }
+    });
+    if (!user || user.role !== UserRole.USER) {
+      throw new ApiException("User not found", "USER_NOT_FOUND", HttpStatus.NOT_FOUND);
+    }
+
+    const now = new Date();
+    const restoring = dto.status === UserStatus.active;
+    const verified = user.kycRecords[0]?.status === "verified";
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          status: dto.status,
+          walletStatus: restoring && verified ? WalletStatus.active : WalletStatus.inactive
+        }
+      });
+      if (restoring) {
+        if (verified) {
+          await tx.dedicatedVirtualAccount.updateMany({
+            where: { userId, status: DvaStatus.inactive },
+            data: { status: DvaStatus.active }
+          });
+          await tx.cashDropProfile.updateMany({
+            where: { userId, status: CashDropProfileStatus.disabled },
+            data: { status: CashDropProfileStatus.active, disabledAt: null }
+          });
+        }
+      } else {
+        await tx.authSession.updateMany({
+          where: { userId, status: AuthSessionStatus.active },
+          data: { status: AuthSessionStatus.revoked, revokedAt: now }
+        });
+        await tx.userDeviceToken.updateMany({ where: { userId, isActive: true }, data: { isActive: false } });
+        await tx.trustedDevice.updateMany({
+          where: { userId, enabled: true },
+          data: { enabled: false, disabledAt: now }
+        });
+        await tx.dedicatedVirtualAccount.updateMany({
+          where: { userId, status: DvaStatus.active },
+          data: { status: DvaStatus.inactive }
+        });
+        await tx.cashDropProfile.updateMany({
+          where: { userId, status: CashDropProfileStatus.active },
+          data: { status: CashDropProfileStatus.disabled, disabledAt: now }
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          actorId: adminId,
+          actorType: "admin",
+          action: "ADMIN_USER_STATUS_UPDATED",
+          entityType: "User",
+          entityId: userId,
+          metadata: { previousStatus: user.status, status: dto.status, reason: dto.reason ?? null }
+        }
+      });
+    });
+    return this.getUser(userId);
   }
 
   async dashboard() {
@@ -146,50 +290,60 @@ export class AdminService {
     return this.me(adminId);
   }
 
-  async deleteUser(adminId: string, userId: string, reason?: string) {
+  async deleteUser(adminId: string, userId: string, dto: AdminDeleteUserDto) {
     if (adminId === userId) {
       throw new ApiException("Admin cannot delete their own account", "ADMIN_CANNOT_DELETE_SELF", HttpStatus.BAD_REQUEST);
     }
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
-    if (!user) throw new ApiException("User not found", "USER_NOT_FOUND", HttpStatus.NOT_FOUND);
-    const now = new Date();
-    await this.prisma.$transaction([
-      this.prisma.user.update({
-        where: { id: userId },
-        data: { status: UserStatus.disabled, walletStatus: WalletStatus.inactive }
-      }),
-      this.prisma.authSession.updateMany({
-        where: { userId, status: AuthSessionStatus.active },
-        data: { status: AuthSessionStatus.revoked, revokedAt: now }
-      }),
-      this.prisma.userDeviceToken.updateMany({
-        where: { userId, isActive: true },
-        data: { isActive: false }
-      }),
-      this.prisma.trustedDevice.updateMany({
-        where: { userId, enabled: true },
-        data: { enabled: false, disabledAt: now }
-      }),
-      this.prisma.dedicatedVirtualAccount.updateMany({
-        where: { userId, status: DvaStatus.active },
-        data: { status: DvaStatus.inactive }
-      }),
-      this.prisma.cashDropProfile.updateMany({
-        where: { userId, status: CashDropProfileStatus.active },
-        data: { status: CashDropProfileStatus.disabled, disabledAt: now }
-      }),
-      this.prisma.auditLog.create({
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        role: true,
+        phoneNumber: true,
+        _count: { select: { transactions: true, kycRecords: true, supportTickets: true } },
+        kycRecords: { select: { rawProviderLogId: true } }
+      }
+    });
+    if (!user || user.role !== UserRole.USER) {
+      throw new ApiException("User not found", "USER_NOT_FOUND", HttpStatus.NOT_FOUND);
+    }
+    if (dto.confirmation !== `DELETE ${user.phoneNumber}`) {
+      throw new ApiException(
+        `Type DELETE ${user.phoneNumber} to confirm permanent deletion`,
+        "USER_DELETE_CONFIRMATION_INVALID",
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    const providerLogIds = user.kycRecords
+      .map((record) => record.rawProviderLogId)
+      .filter((id): id is string => Boolean(id));
+    await this.prisma.$transaction(async (tx) => {
+      await tx.securityAudit.deleteMany({ where: { userId } });
+      await tx.auditLog.deleteMany({
+        where: { OR: [{ actorId: userId }, { entityType: "User", entityId: userId }] }
+      });
+      await tx.auditLog.create({
         data: {
           actorId: adminId,
           actorType: "admin",
-          action: "ADMIN_USER_DELETED",
+          action: "ADMIN_USER_PERMANENTLY_DELETED",
           entityType: "User",
           entityId: userId,
-          metadata: { reason: reason ?? null, softDelete: true }
+          metadata: {
+            reason: dto.reason,
+            hardDelete: true,
+            deletedCounts: user._count
+          }
         }
-      })
-    ]);
-    return { deleted: true, userId, status: UserStatus.disabled };
+      });
+      await tx.cashDropProfile.deleteMany({ where: { userId } });
+      await tx.user.delete({ where: { id: userId } });
+      if (providerLogIds.length) {
+        await tx.providerLog.deleteMany({ where: { id: { in: providerLogIds } } });
+      }
+    });
+    return { deleted: true, permanent: true, userId };
   }
 
   listAuthSessions(take = 50, skip = 0) {
