@@ -197,6 +197,72 @@ export class KycService {
     };
   }
 
+  async verifyNin(userId: string, nin: string) {
+    if (!this.selfieKycProvider.verifyNin) {
+      throw new ApiException("BytID NIN verification is unavailable", "NIN_VERIFICATION_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE);
+    }
+    const ninHash = sha256(nin);
+    const [user, duplicate, record] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: userId }, include: { profile: true } }),
+      this.prisma.kycRecord.findFirst({ where: { ninHash, userId: { not: userId } }, select: { id: true } }),
+      this.prisma.kycRecord.findFirst({ where: { userId }, orderBy: { createdAt: "desc" } })
+    ]);
+    if (!user) throw new ApiException("User not found", "USER_NOT_FOUND", HttpStatus.NOT_FOUND);
+    if (!record || record.status !== KycStatus.verified || !record.bvnVerified) {
+      throw new ApiException("Verified BVN is required before adding NIN", "BVN_VERIFICATION_REQUIRED", HttpStatus.FORBIDDEN);
+    }
+    if (duplicate) {
+      throw new ApiException("This NIN is already registered to a Transfa account", "NIN_ALREADY_REGISTERED", HttpStatus.CONFLICT);
+    }
+    const reference = `nin_ref_${uuid().replace(/-/g, "").slice(0, 12)}`;
+    const result = await this.selfieKycProvider.verifyNin(nin, userId, {
+      firstName: user.profile?.firstName ?? undefined,
+      lastName: user.profile?.lastName ?? undefined,
+      dateOfBirth: formatDateForProvider(user.profile?.dateOfBirth),
+      reference
+    });
+    if (!result.ninVerified) {
+      throw new ApiException("NIN could not be verified", "NIN_NOT_VERIFIED", HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+    const providerLogId = await this.logKycProvider(
+      result.provider,
+      "kyc_nin_verify",
+      reference,
+      result.providerReference,
+      "success",
+      result.rawProviderResponse
+    );
+    await this.prisma.$transaction([
+      this.prisma.kycRecord.update({
+        where: { id: record.id },
+        data: {
+          ninHash,
+          ninMasked: result.ninMasked,
+          rawProviderLogId: providerLogId,
+          metadata: { ...((record.metadata as object) ?? {}), nin: result } as unknown as Prisma.InputJsonObject
+        }
+      }),
+      this.prisma.profile.updateMany({
+        where: { userId, email: null },
+        data: { email: result.email }
+      }),
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { accountTier: user.accountTier === "prime" ? "prime" : "captain" }
+      }),
+      this.prisma.auditLog.create({
+        data: { actorId: userId, actorType: "user", action: "NIN_VERIFIED_TIER_UPGRADED", entityType: "KycRecord", entityId: record.id, metadata: { accountTier: user.accountTier === "prime" ? "prime" : "captain" } }
+      })
+    ]);
+    return {
+      ninVerified: true,
+      ninMasked: result.ninMasked,
+      accountTier: user.accountTier === "prime" ? "prime" : "captain",
+      email: user.profile?.email ?? result.email ?? null,
+      profileImageUrl: user.profile?.profileImageUrl ?? null
+    };
+  }
+
   async getStatus(userId: string) {
     const record = await this.prisma.kycRecord.findFirst({
       where: { userId },

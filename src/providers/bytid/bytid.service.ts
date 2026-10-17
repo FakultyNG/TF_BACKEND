@@ -8,6 +8,7 @@ import {
   KycProvider,
   KycVerificationContext,
   LivenessSessionResult,
+  NinVerificationResult,
   SelfieValidationResult
 } from "../interfaces/kyc-provider.interface";
 
@@ -35,6 +36,30 @@ export class BytidKycProvider implements KycProvider {
       this.identityPayload(bvn, context)
     );
     return this.mapBvnResult(raw, bvn);
+  }
+
+  async verifyNin(nin: string, _userId?: string, context?: KycVerificationContext): Promise<NinVerificationResult> {
+    const raw = await this.post(
+      this.config.get<string>("BYTID_NIN_PATH", "/identity/nin"),
+      this.identityPayload(nin, context)
+    );
+    const result = this.mapBvnResult(raw, nin, "NIN");
+    return {
+      provider: result.provider,
+      providerReference: result.providerReference,
+      ninMasked: result.bvnMasked,
+      ninVerified: result.bvnVerified,
+      firstName: result.firstName,
+      middleName: result.middleName,
+      lastName: result.lastName,
+      email: result.email,
+      phoneNumber: result.phoneNumber,
+      dateOfBirth: result.dateOfBirth,
+      gender: result.gender,
+      country: result.country,
+      imageUrl: result.imageUrl,
+      rawProviderResponse: result.rawProviderResponse
+    };
   }
 
   async verifyBvnWithSelfie(bvn: string, selfieImageBase64: string, _userId?: string, context?: KycVerificationContext): Promise<SelfieValidationResult> {
@@ -133,7 +158,7 @@ export class BytidKycProvider implements KycProvider {
     });
   }
 
-  private mapBvnResult(raw: unknown, bvn: string): BvnVerificationResult {
+  private mapBvnResult(raw: unknown, bvn: string, identifierType: "BVN" | "NIN" = "BVN"): BvnVerificationResult {
     const envelope = objectOrEmpty(raw);
     if (envelope.success === false) {
       this.throwEnvelopeError(envelope, "BytID verification failed");
@@ -142,12 +167,12 @@ export class BytidKycProvider implements KycProvider {
     const person = objectOrEmpty(verification.data);
     const status = firstString(verification.status)?.toLowerCase();
     if (status === "not_found") {
-      throw new ApiException("BVN was not found", "BYTID_BVN_NOT_FOUND", HttpStatus.UNPROCESSABLE_ENTITY, {
+      throw new ApiException(`${identifierType} was not found`, `BYTID_${identifierType}_NOT_FOUND`, HttpStatus.UNPROCESSABLE_ENTITY, {
         requestId: firstString(envelope.request_id)
       });
     }
     if (status === "failed") {
-      throw new ApiException("BytID could not reach the BVN registry", "BYTID_REGISTRY_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE, {
+      throw new ApiException(`BytID could not reach the ${identifierType} registry`, "BYTID_REGISTRY_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE, {
         requestId: firstString(envelope.request_id)
       });
     }
@@ -173,7 +198,7 @@ export class BytidKycProvider implements KycProvider {
       rawProviderResponse: sanitize(raw)
     };
     if (verified && (!result.firstName || !result.lastName || !result.dateOfBirth)) {
-      throw new ApiException("BytID BVN response is missing required identity fields", "BYTID_BVN_RESPONSE_INCOMPLETE", HttpStatus.BAD_GATEWAY, {
+      throw new ApiException(`BytID ${identifierType} response is missing required identity fields`, `BYTID_${identifierType}_RESPONSE_INCOMPLETE`, HttpStatus.BAD_GATEWAY, {
         requestId: firstString(envelope.request_id)
       });
     }

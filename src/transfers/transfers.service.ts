@@ -51,6 +51,7 @@ export class TransfersService {
   }
 
   async quoteNgn(userId: string, dto: NgnTransferQuoteDto) {
+    await this.walletService.assertDailySendLimit(userId, dto.amount);
     const balance = await this.walletService.getBalance(userId);
     const fee = await this.pricingService.calculateNgnTransferFee(dto.amount);
     const totalDebit = dto.amount + fee;
@@ -148,6 +149,7 @@ export class TransfersService {
 
   async quoteFx(userId: string, payoutCurrency: "USD" | "CNY", dto: FxTransferQuoteDto) {
     const providerQuote = await this.fxProvider.quote({ payoutCurrency, amount: dto.amount });
+    await this.walletService.assertDailySendLimit(userId, providerQuote.totalNgnDebit);
     const balance = await this.walletService.getBalance(userId);
     if (balance.balance < providerQuote.totalNgnDebit) {
       throw new ApiException("Insufficient wallet balance", "INSUFFICIENT_BALANCE", HttpStatus.BAD_REQUEST);

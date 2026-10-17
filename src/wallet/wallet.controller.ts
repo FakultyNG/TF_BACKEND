@@ -19,6 +19,12 @@ export class WalletController {
     return success("Dedicated virtual account created successfully", data);
   }
 
+  @Post("add-money/clicked")
+  async markAddMoneyClicked(@CurrentUser() user: { sub: string }) {
+    const data = await this.walletService.markAddMoneyClicked(user.sub);
+    return success("Add Money prompt dismissed successfully", data);
+  }
+
   @Get("dva")
   async getDva(@CurrentUser() user: { sub: string }) {
     const data = await this.walletService.getDva(user.sub);

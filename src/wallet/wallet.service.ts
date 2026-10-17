@@ -1,5 +1,6 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import {
+  AccountTier,
   DvaStatus,
   LedgerEntryType,
   Prisma,
@@ -77,6 +78,38 @@ export class WalletService {
     });
     await this.logProvider(result.provider, "create_dva", userId, result.providerReference, "successful", { preferredBank }, result.raw);
     return this.toDvaResponse(dva);
+  }
+
+  async markAddMoneyClicked(userId: string) {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { addMoneyClickedAt: new Date() },
+      select: { addMoneyClickedAt: true }
+    });
+    return { showAddMoney: false, addMoneyClickedAt: user.addMoneyClickedAt };
+  }
+
+  async assertDailySendLimit(userId: string, amount: number) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { accountTier: true } });
+    if (!user) throw new ApiException("User not found", "USER_NOT_FOUND", HttpStatus.NOT_FOUND);
+    const limits = this.tierLimits(user.accountTier);
+    const sent = await this.prisma.transaction.aggregate({
+      where: {
+        userId,
+        type: { in: [TransactionType.ngn_transfer, TransactionType.usd_transfer, TransactionType.cny_transfer] },
+        status: { in: [TransactionStatus.pending, TransactionStatus.processing, TransactionStatus.successful] },
+        createdAt: { gte: startOfUtcDay() }
+      },
+      _sum: { totalDebit: true }
+    });
+    if ((sent._sum.totalDebit ?? 0) + amount > limits.dailySend) {
+      throw new ApiException(
+        `This transfer exceeds your ${user.accountTier} daily send limit`,
+        "ACCOUNT_TIER_DAILY_SEND_LIMIT_EXCEEDED",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        { accountTier: user.accountTier, dailyLimit: limits.dailySend, usedToday: sent._sum.totalDebit ?? 0 }
+      );
+    }
   }
 
   async recreateDva(adminId: string, userId: string) {
@@ -162,6 +195,25 @@ export class WalletService {
   async creditWallet(input: WalletMutationInput) {
     return this.prisma.$transaction(async (tx) => {
       const wallet = await this.ensureWalletTx(tx, input.userId, WalletStatus.active);
+      const user = await tx.user.findUnique({ where: { id: input.userId }, select: { accountTier: true } });
+      if (!user) throw new ApiException("User not found", "USER_NOT_FOUND", HttpStatus.NOT_FOUND);
+      if ((input.entryType ?? LedgerEntryType.credit) === LedgerEntryType.credit) {
+        const limits = this.tierLimits(user.accountTier);
+        const received = await tx.walletLedger.aggregate({
+          where: { userId: input.userId, entryType: LedgerEntryType.credit, createdAt: { gte: startOfUtcDay() } },
+          _sum: { amount: true }
+        });
+        if ((received._sum.amount ?? 0) + input.amount > limits.dailyReceive) {
+          throw new ApiException(`This credit exceeds your ${user.accountTier} daily receive limit`, "ACCOUNT_TIER_DAILY_RECEIVE_LIMIT_EXCEEDED", HttpStatus.UNPROCESSABLE_ENTITY, {
+            accountTier: user.accountTier, dailyLimit: limits.dailyReceive, usedToday: received._sum.amount ?? 0
+          });
+        }
+        if (wallet.balance + input.amount > limits.maxBalance) {
+          throw new ApiException(`This credit exceeds your ${user.accountTier} maximum balance`, "ACCOUNT_TIER_MAX_BALANCE_EXCEEDED", HttpStatus.UNPROCESSABLE_ENTITY, {
+            accountTier: user.accountTier, maxBalance: limits.maxBalance, currentBalance: wallet.balance
+          });
+        }
+      }
       const transaction = await tx.transaction.create({
         data: {
           userId: input.userId,
@@ -435,6 +487,25 @@ export class WalletService {
     const lower = key.toLowerCase();
     return ["bvn", "nin", "token", "secret", "authorization", "password", "passcode"].some((part) => lower.includes(part));
   }
+
+  private tierLimits(tier: AccountTier) {
+    const prefix = tier.toUpperCase();
+    const defaults = tier === AccountTier.citizen
+      ? { dailySend: 50000, dailyReceive: 300000, maxBalance: 300000 }
+      : tier === AccountTier.captain
+        ? { dailySend: 200000, dailyReceive: 500000, maxBalance: 500000 }
+        : { dailySend: 5000000, dailyReceive: 1000000000, maxBalance: 1000000000000 };
+    return {
+      dailySend: Number(process.env[`${prefix}_DAILY_SEND_LIMIT`] ?? defaults.dailySend),
+      dailyReceive: Number(process.env[`${prefix}_DAILY_RECEIVE_LIMIT`] ?? defaults.dailyReceive),
+      maxBalance: Number(process.env[`${prefix}_MAX_BALANCE`] ?? defaults.maxBalance)
+    };
+  }
+}
+
+function startOfUtcDay() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
 export interface WalletMutationInput {

@@ -42,6 +42,8 @@ export class UsersRepository {
         role: true,
         status: true,
         walletStatus: true,
+        accountTier: true,
+        addMoneyClickedAt: true,
         createdAt: true,
         profile: true,
         kycRecords: { orderBy: { createdAt: "desc" }, take: 1 }

@@ -14,6 +14,7 @@ import {
 } from "../auth/dto/register-kyc-liveness.dto";
 import { SelfieValidateDto } from "./dto/selfie-validate.dto";
 import { VerifyBvnDto } from "./dto/verify-bvn.dto";
+import { VerifyNinDto } from "./dto/verify-nin.dto";
 import { KycService } from "./kyc.service";
 
 @ApiTags("KYC")
@@ -34,6 +35,14 @@ export class KycController {
     const user = await this.requireBearerUser(authorization);
     const data = await this.kycService.verifyBvn(user.sub, dto.bvn);
     return success("BVN verified successfully", data);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post("nin/verify")
+  async verifyNin(@CurrentUser() user: { sub: string }, @Body() dto: VerifyNinDto) {
+    const data = await this.kycService.verifyNin(user.sub, dto.nin);
+    return success("NIN verified successfully", data);
   }
 
   @Post("bvn/liveness/start")

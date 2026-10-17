@@ -47,18 +47,22 @@ export class AuthService {
     if (existing) throw this.phoneAlreadyRegistered();
     const registrationToken = existingToken ?? `reg_temp_${uuid().replace(/-/g, "").slice(0, 12)}`;
     const ttl = Number(this.config.get<string>("REGISTRATION_TTL_SECONDS", "900"));
+    let registrationWrite: Promise<unknown> = Promise.resolve();
     if (!existingToken) {
       const session: RegistrationSession = {
         phoneNumber: normalized,
         requiresOtp: true,
         createdAt: new Date().toISOString()
       };
-      await Promise.all([
+      registrationWrite = Promise.all([
         this.redis.setJson(`registration:${registrationToken}`, session, ttl),
         this.redis.setJson(`registration-phone:${normalized}`, registrationToken, ttl)
       ]);
     }
-    const challenge = await this.otpService.sendOtp(normalized);
+    const [, challenge] = await Promise.all([
+      registrationWrite,
+      this.otpService.sendOtp(normalized)
+    ]);
     return {
       registrationToken,
       phoneNumber: normalized,
@@ -558,7 +562,7 @@ export class AuthService {
 
   async issueMobileTokens(userId: string, meta: { ipAddress?: string; userAgent?: string }) {
     const refreshExpiresAt = new Date();
-    refreshExpiresAt.setDate(refreshExpiresAt.getDate() + Number(this.config.get<string>("JWT_REFRESH_TTL_DAYS", "30")));
+    refreshExpiresAt.setDate(refreshExpiresAt.getDate() + Number(this.config.get<string>("JWT_REFRESH_TTL_DAYS", "3")));
     const session = await this.prisma.authSession.create({
       data: {
         userId,
@@ -571,7 +575,7 @@ export class AuthService {
     const accessToken = await this.createAccessToken(userId, session.id);
     const refreshToken = await this.jwt.signAsync(
       { sub: userId, sid: session.id, typ: "refresh" },
-      { secret: this.config.get<string>("JWT_REFRESH_SECRET"), expiresIn: `${this.config.get<string>("JWT_REFRESH_TTL_DAYS", "30")}d` }
+      { secret: this.config.get<string>("JWT_REFRESH_SECRET"), expiresIn: `${this.config.get<string>("JWT_REFRESH_TTL_DAYS", "3")}d` }
     );
     await this.prisma.authSession.update({
       where: { id: session.id },

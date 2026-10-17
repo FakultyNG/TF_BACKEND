@@ -2732,3 +2732,11 @@ Deletion is a backend soft delete. The backend does not hard-delete the user row
 - The app must not expose provider names to users unless necessary.
 - The app must show NGN wallet balance only.
 - USD and CNY are payout currencies, not wallet balances.
+# 2026-10-17 account access, tiers, NIN, and Add Money updates
+
+- Mobile refresh sessions expire after 72 hours by default (`JWT_REFRESH_TTL_DAYS=3`). A successful passcode unlock performs a fresh login, beginning a new 72-hour session. Expired sessions return `401` and the app opens `/unlock/phone`.
+- `POST /api/v1/kyc/nin/verify` (Bearer auth), body `{ "nin": "12345678901" }`: performs the live BytID `POST /identity/nin` lookup. A verified NIN stores only its hash/masked value, fills a missing profile email if the provider supplies one, and upgrades Citizen to Captain without downgrading Prime.
+- `POST /api/v1/wallet/add-money/clicked` (Bearer auth): permanently records the first Add Money click for the account and returns `{ "showAddMoney": false, "addMoneyClickedAt": "..." }`.
+- Profile and authentication user objects now include `accountTier` (`citizen | captain | prime`) and `showAddMoney`.
+- `PATCH /api/v1/admin/users/:userId/profile/operational` accepts `accountTier`, in addition to the existing operational fields.
+- Transfer quotes enforce the tier's daily send ceiling. Wallet credits enforce daily receive and maximum-balance ceilings. Defaults are configurable through `CITIZEN_*`, `CAPTAIN_*`, and `PRIME_*` environment variables.

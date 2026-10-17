@@ -58,11 +58,12 @@ export class ProfileService {
     };
   }
 
-  async adminUpdateOperationalFields(adminId: string, userId: string, data: { walletStatus?: "active" | "inactive"; supportNotes?: string; riskNotes?: string }) {
+  async adminUpdateOperationalFields(adminId: string, userId: string, data: { walletStatus?: "active" | "inactive"; accountTier?: "citizen" | "captain" | "prime"; supportNotes?: string; riskNotes?: string }) {
     const updated = await this.prisma.user.update({
       where: { id: userId },
       data: {
         walletStatus: data.walletStatus,
+        accountTier: data.accountTier,
         supportNotes: data.supportNotes,
         riskNotes: data.riskNotes
       },
@@ -85,6 +86,8 @@ export class ProfileService {
     id: string;
     phoneNumber: string;
     walletStatus: string;
+    accountTier: string;
+    addMoneyClickedAt?: Date | null;
     supportNotes?: string | null;
     riskNotes?: string | null;
     profile: { firstName: string | null; lastName: string | null; email: string | null; dateOfBirth: Date | null; gender?: string | null; country?: string | null; profileImageUrl: string | null } | null;
@@ -103,6 +106,8 @@ export class ProfileService {
       profileImageUrl: user.profile?.profileImageUrl ?? null,
       kycStatus: user.kycRecords[0]?.status ?? "not_started",
       walletStatus: user.walletStatus,
+      accountTier: user.accountTier,
+      showAddMoney: !user.addMoneyClickedAt,
       biometricStatus: user.trustedDevices?.some((device) => device.enabled) ?? false,
       supportNotes: user.supportNotes,
       riskNotes: user.riskNotes

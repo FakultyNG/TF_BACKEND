@@ -1,8 +1,13 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
-import { WalletStatus } from "@prisma/client";
+import { AccountTier, WalletStatus } from "@prisma/client";
 import { IsEnum, IsOptional, IsString, MaxLength } from "class-validator";
 
 export class AdminUserOperationalUpdateDto {
+  @ApiPropertyOptional({ enum: AccountTier })
+  @IsOptional()
+  @IsEnum(AccountTier)
+  accountTier?: AccountTier;
+
   @ApiPropertyOptional({ enum: WalletStatus })
   @IsOptional()
   @IsEnum(WalletStatus)

@@ -35,6 +35,12 @@ enum WalletStatus {
   active
 }
 
+enum AccountTier {
+  citizen
+  captain
+  prime
+}
+
 enum DvaStatus {
   active
   inactive
@@ -131,6 +137,8 @@ model User {
   status       UserStatus   @default(active)
   role         UserRole     @default(USER)
   walletStatus WalletStatus @default(inactive)
+  accountTier  AccountTier  @default(citizen)
+  addMoneyClickedAt DateTime?
   supportNotes String?
   riskNotes    String?
   createdAt    DateTime     @default(now())
@@ -159,6 +167,7 @@ model User {
 
   @@index([phoneNumber])
   @@index([role])
+  @@index([accountTier])
 }
 
 model Wallet {

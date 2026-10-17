@@ -43,6 +43,23 @@ export interface SelfieValidationResult {
   rawProviderResponse?: unknown;
 }
 
+export interface NinVerificationResult {
+  provider: string;
+  providerReference?: string;
+  ninMasked?: string;
+  ninVerified: boolean;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  email?: string;
+  phoneNumber?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  country?: string;
+  imageUrl?: string;
+  rawProviderResponse?: unknown;
+}
+
 export interface KycVerificationContext {
   phoneNumber?: string;
   firstName?: string;
@@ -72,4 +89,5 @@ export interface KycProvider {
   getLivenessSession?(sessionId: string): Promise<LivenessSessionResult>;
   verifyBvnWithLiveness?(bvn: string, livenessSessionId: string, userId?: string, context?: KycVerificationContext): Promise<SelfieValidationResult>;
   getVerificationStatus(providerReference: string): Promise<BvnVerificationResult | SelfieValidationResult>;
+  verifyNin?(nin: string, userId?: string, context?: KycVerificationContext): Promise<NinVerificationResult>;
 }
