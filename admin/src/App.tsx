@@ -1,6 +1,6 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import {
-  Bell, ChevronDown, CircleDollarSign, LayoutDashboard, LogOut, Menu, MessageCircle,
+  Bell, ChevronDown, LayoutDashboard, LogOut, Menu, MessageCircle,
   ReceiptText, ShieldCheck, Users, X
 } from "lucide-react";
 import { api, authStore, displayName } from "./api";
@@ -76,7 +76,7 @@ function Login({ onLogin }: { onLogin: (admin: Admin) => void }) {
         <form className="login-form" onSubmit={submit}>
           <span className="eyebrow">ADMIN ACCESS</span>
           <h2>Welcome back</h2>
-          <p className="muted">Use the administrator phone number and passcode configured in Railway.</p>
+          <p className="muted">Only Authorized Users allowed beyond this point</p>
           <label>Phone number<input autoComplete="username" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="234 800 000 0000" required /></label>
           <label>5-digit passcode<input type="password" inputMode="numeric" maxLength={5} pattern="[0-9]{5}" autoComplete="current-password" value={passcode} onChange={(e) => setPasscode(e.target.value.replace(/\D/g, ""))} placeholder="•••••" required /></label>
           {error && <div className="error-banner">{error}</div>}
@@ -146,5 +146,5 @@ function Shell({ admin, onLogout }: { admin: Admin; onLogout: () => void }) {
 }
 
 export function Brand({ inverse = false }: { inverse?: boolean }) {
-  return <div className={`brand ${inverse ? "inverse" : ""}`}><span className="brand-mark"><CircleDollarSign size={20} /></span><strong>Transfa</strong><small>admin</small></div>;
+  return <div className={`brand ${inverse ? "inverse" : ""}`}><span className="brand-mark"><img src={`${import.meta.env.BASE_URL}transfa-logo.png`} alt="" aria-hidden="true" /></span><strong>Transfa</strong><small>admin</small></div>;
 }
