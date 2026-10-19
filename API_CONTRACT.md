@@ -888,6 +888,16 @@ POST /funding/verify
 
 # NGN TRANSFER
 
+0. Match Device Contacts
+
+POST /transfers/contacts/match (Bearer token required)
+
+```json
+{ "phoneNumbers": ["+2348012345678", "08098765432"] }
+```
+
+The API normalizes at most 500 submitted numbers and returns only active Transfa users among them that have an active DVA. Each item includes `userId`, canonical `phoneNumber`, `displayName`, CashDrop/profile `profileImageUrl`, `accountNumber`, `accountName`, `bankName`, and `bankCode`. The mobile Contacts picker uses this response and fills the existing Pay Sheet after selection.
+
 1. Get Banks
 
 GET /transfers/ngn/banks
@@ -2824,6 +2834,8 @@ After three unsuccessful NIN/OTP attempts, the error details include `supportReq
 
 - Strowallet DVA-credit transactions store the sender account name, sender bank/account, provider narration, and a matching Transfa profile image when one exists.
 - Transaction list/detail responses can include `counterpartyProfileImageUrl` and `memo`.
+- `GET /api/v1/transfers/ngn/banks` uses Strowallet's live `GET /api/banks/lists/` endpoint when `BANKING_PROVIDER=strowallet`. Empty provider responses are not cached; the mobile Bank Center displays the returned bank names and codes in its original Suggestions/All Banks UI.
+- The wallet share action exports only the original white account card as PNG, populated with the authenticated user's profile image/name and the live DVA bank name/account number.
 - The general notification badge is derived from notification receipt `isRead` state.
 - `GET /api/v1/notifications/support/unread-count` returns `{ "count": number }` for the Support app-icon badge.
 - `PATCH /api/v1/notifications/support/read-all` marks support notifications read when the user opens the support conversation.

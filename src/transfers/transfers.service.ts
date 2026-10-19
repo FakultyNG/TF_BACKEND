@@ -15,6 +15,8 @@ import { FxTransferQuoteDto } from "./dto/fx-transfer-quote.dto";
 import { NgnTransferQuoteDto } from "./dto/ngn-transfer-quote.dto";
 import { FxQuote, NgnQuote } from "./quote.types";
 import { RecentBeneficiariesService } from "./recent-beneficiaries.service";
+import { PrismaService } from "../prisma/prisma.service";
+import { normalizePhoneNumber } from "../common/utils/phone.util";
 
 @Injectable()
 export class TransfersService {
@@ -29,14 +31,15 @@ export class TransfersService {
     private readonly recentBeneficiaries: RecentBeneficiariesService,
     @Inject(NGN_TRANSFER_PROVIDER) private readonly ngnProvider: NgnTransferProviderService,
     @Inject(FX_PAYOUT_PROVIDER) private readonly fxProvider: FxPayoutProviderService,
-    @Optional() private readonly biometricsService?: BiometricsService
+    @Optional() private readonly biometricsService?: BiometricsService,
+    @Optional() private readonly prisma?: PrismaService
   ) {}
 
   async getBanks() {
     const cached = await this.redis.getJson<Array<{ code: string; name: string }>>("banks:ngn");
-    if (cached) return cached;
+    if (cached?.length) return cached;
     const banks = await this.ngnProvider.getBanks();
-    await this.redis.setJson("banks:ngn", banks, 86400);
+    if (banks.length) await this.redis.setJson("banks:ngn", banks, 86400);
     return banks;
   }
 
@@ -48,6 +51,60 @@ export class TransfersService {
     const providerSuggestions = await this.ngnProvider.suggestBanksByAccountNumber(accountNumber);
     const suggestions = [...providerSuggestions].sort((left, right) => right.confidence - left.confidence).slice(0, 3);
     return { accountNumber, suggestions };
+  }
+
+  async matchContacts(userId: string, phoneNumbers: string[]) {
+    if (!this.prisma) {
+      throw new ApiException("Contact matching is unavailable", "CONTACT_MATCH_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE);
+    }
+    const normalized = [...new Set(phoneNumbers.flatMap((phoneNumber) => {
+      try {
+        return [normalizePhoneNumber(phoneNumber)];
+      } catch {
+        return [];
+      }
+    }))];
+    if (!normalized.length) return { items: [] };
+
+    const users = await this.prisma.user.findMany({
+      where: { id: { not: userId }, phoneNumber: { in: normalized }, status: "active" },
+      select: {
+        id: true,
+        phoneNumber: true,
+        profile: { select: { firstName: true, lastName: true, profileImageUrl: true } },
+        cashDropProfile: { select: { profileImageUrl: true } },
+        dedicatedVirtualAccounts: {
+          where: { status: "active" },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { accountNumber: true, accountName: true, bankName: true, metadata: true }
+        }
+      }
+    });
+    const banks = await this.getBanks();
+    return {
+      items: users.flatMap((user) => {
+        const dva = user.dedicatedVirtualAccounts[0];
+        if (!dva) return [];
+        const bank = banks.find((candidate) => this.sameBank(candidate.name, dva.bankName));
+        const metadata = dva.metadata && typeof dva.metadata === "object" && !Array.isArray(dva.metadata)
+          ? dva.metadata as Record<string, unknown>
+          : {};
+        const bankCode = bank?.code ?? this.stringValue(metadata.bankCode) ?? this.stringValue(metadata.bank_code);
+        if (!bankCode) return [];
+        const profileName = [user.profile?.firstName, user.profile?.lastName].filter(Boolean).join(" ").trim();
+        return [{
+          userId: user.id,
+          phoneNumber: user.phoneNumber,
+          displayName: profileName || dva.accountName,
+          profileImageUrl: user.cashDropProfile?.profileImageUrl ?? user.profile?.profileImageUrl ?? null,
+          accountNumber: dva.accountNumber,
+          accountName: dva.accountName,
+          bankName: dva.bankName,
+          bankCode
+        }];
+      })
+    };
   }
 
   async quoteNgn(userId: string, dto: NgnTransferQuoteDto) {
@@ -288,6 +345,17 @@ export class TransfersService {
       reverseTransaction?: (adminId: string | undefined, transactionId: string, reason: string) => Promise<unknown>;
     };
     return wallet.reverseTransaction?.(undefined, transactionId, reason);
+  }
+
+  private sameBank(left: string, right: string) {
+    const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/(plc|limited|ltd|bank)/g, "");
+    const a = normalize(left);
+    const b = normalize(right);
+    return Boolean(a && b && (a === b || a.includes(b) || b.includes(a)));
+  }
+
+  private stringValue(value: unknown) {
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
   }
 
   private authorizeTransfer(userId: string, passcode?: string, biometricDeviceId?: string) {

@@ -92,14 +92,33 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
   async getBanks(): Promise<Bank[]> {
     const raw = await this.get(this.config.get<string>("STROWALLET_BANK_LIST_PATH", "/api/banks/lists/"));
     const top = objectOrEmpty(raw);
-    const rows = firstArray(raw, top.data, unwrap(raw).banks, unwrap(raw).bankList, unwrap(raw).list);
-    return rows.map((item) => {
+    const body = unwrap(raw);
+    const rows = firstArray(
+      raw,
+      top.data,
+      body.banks,
+      body.bankList,
+      body.bank_list,
+      body.banklist,
+      body.list,
+      body.result,
+      body.results
+    );
+    const banks = rows.map((item) => {
       const row = objectOrEmpty(item);
       return {
-        code: firstString(row.code, row.bankCode, row.bank_code, row.id) || "",
-        name: firstString(row.name, row.bankName, row.bank_name) || ""
+        code: firstString(row.code, row.bankCode, row.bank_code, row.BankCode, row.bankcode, row.id) || "",
+        name: firstString(row.name, row.bankName, row.bank_name, row.BankName, row.bank) || ""
       };
     }).filter((bank) => bank.code && bank.name);
+    if (!banks.length) {
+      throw new ApiException(
+        "Strowallet returned an empty bank list",
+        "STROWALLET_BANK_LIST_EMPTY",
+        HttpStatus.BAD_GATEWAY
+      );
+    }
+    return banks;
   }
 
   async suggestBanksByAccountNumber(accountNumber: string): Promise<BankAccountSuggestion[]> {

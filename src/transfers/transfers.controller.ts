@@ -8,6 +8,7 @@ import { FxTransferQuoteDto } from "./dto/fx-transfer-quote.dto";
 import { NgnTransferQuoteDto } from "./dto/ngn-transfer-quote.dto";
 import { ResolveAccountDto } from "./dto/resolve-account.dto";
 import { SuggestNgnBanksDto } from "./dto/suggest-ngn-banks.dto";
+import { MatchContactsDto } from "./dto/match-contacts.dto";
 import { TransfersService } from "./transfers.service";
 
 @ApiTags("Transfers")
@@ -72,6 +73,13 @@ export class TransfersController {
   async suggestBanks(@Body() dto: SuggestNgnBanksDto) {
     const data = await this.transfersService.suggestBanksByAccountNumber(dto.accountNumber);
     return success("Bank suggestions fetched successfully", data);
+  }
+
+  @Post("contacts/match")
+  @ApiOperation({ summary: "Match device phone numbers to active Transfa recipients" })
+  async matchContacts(@CurrentUser() user: { sub: string }, @Body() dto: MatchContactsDto) {
+    const data = await this.transfersService.matchContacts(user.sub, dto.phoneNumbers);
+    return success("Transfa contacts matched successfully", data);
   }
 
   @Post("ngn/quote")

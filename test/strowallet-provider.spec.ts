@@ -7,6 +7,29 @@ const config = (values: Record<string, string> = {}) => ({
 }) as unknown as ConfigService;
 
 describe("Strowallet provider", () => {
+  it("loads and normalizes the live Strowallet bank list", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_live" }), {} as never);
+    const request = jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+      data: {
+        bank_list: [
+          { bank_code: "044", bank_name: "Access Bank" },
+          { BankCode: "058", BankName: "GTBank" }
+        ]
+      }
+    });
+
+    await expect(service.getBanks()).resolves.toEqual([
+      { code: "044", name: "Access Bank" },
+      { code: "058", name: "GTBank" }
+    ]);
+    expect(request).toHaveBeenCalledWith(
+      "get",
+      "/api/banks/lists/",
+      undefined,
+      { public_key: "pk_live" }
+    );
+  });
+
   it("creates Sterling virtual accounts with the configured webhook url", async () => {
     const service = new StrowalletService(config({
       STROWALLET_PUBLIC_KEY: "pk_test",
