@@ -1,4 +1,4 @@
-import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { HttpStatus, Inject, Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import {
   AccountTier,
   DvaStatus,
@@ -12,14 +12,33 @@ import { v4 as uuid } from "uuid";
 import { ApiException } from "../common/errors/api.exception";
 import { PrismaService } from "../prisma/prisma.service";
 import { DvaProviderService } from "../providers/dva/dva-provider.interface";
-import { DVA_PROVIDER } from "../providers/provider.tokens";
+import { NgnTransferProviderService } from "../providers/transfers/ngn-transfer-provider.interface";
+import { DVA_PROVIDER, NGN_TRANSFER_PROVIDER } from "../providers/provider.tokens";
 
 @Injectable()
-export class WalletService {
+export class WalletService implements OnModuleInit, OnModuleDestroy {
+  private holdSweep?: NodeJS.Timeout;
+
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(DVA_PROVIDER) private readonly dvaProvider: DvaProviderService
+    @Inject(DVA_PROVIDER) private readonly dvaProvider: DvaProviderService,
+    @Inject(NGN_TRANSFER_PROVIDER) private readonly ngnProvider: NgnTransferProviderService
   ) {}
+
+  onModuleInit() {
+    if (process.env.MONEY_LIMIT_HOLD_SWEEP_ENABLED === "false") return;
+    const intervalMs = Math.max(30_000, Number(process.env.MONEY_LIMIT_HOLD_SWEEP_MS ?? 60_000));
+    this.holdSweep = setInterval(
+      () => void this.processMoneyLimitHolds().catch(() => undefined),
+      intervalMs
+    );
+    this.holdSweep.unref();
+    void this.processMoneyLimitHolds().catch(() => undefined);
+  }
+
+  onModuleDestroy() {
+    if (this.holdSweep) clearInterval(this.holdSweep);
+  }
 
   async getOrCreateWallet(userId: string, status: WalletStatus = WalletStatus.inactive) {
     const existing = await this.prisma.wallet.findUnique({ where: { userId } });
@@ -255,6 +274,200 @@ export class WalletService {
       await tx.user.update({ where: { id: input.userId }, data: { walletStatus: WalletStatus.active } });
       return { transaction, wallet: updatedWallet, ledger };
     });
+  }
+
+  async assessIncomingCredit(userId: string, amount: number) {
+    const [user, wallet, received] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: userId }, select: { accountTier: true } }),
+      this.getOrCreateWallet(userId),
+      this.prisma.walletLedger.aggregate({
+        where: { userId, entryType: LedgerEntryType.credit, createdAt: { gte: startOfUtcDay() } },
+        _sum: { amount: true }
+      })
+    ]);
+    if (!user) throw new ApiException("User not found", "USER_NOT_FOUND", HttpStatus.NOT_FOUND);
+    const usedToday = received._sum.amount ?? 0;
+    const canReceiveAt = (tier: AccountTier) => {
+      const limits = this.tierLimits(tier);
+      return usedToday + amount <= limits.dailyReceive && wallet.balance + amount <= limits.maxBalance;
+    };
+    if (canReceiveAt(user.accountTier)) return { allowed: true, currentTier: user.accountTier };
+    const requiredTier = canReceiveAt(AccountTier.captain) ? AccountTier.captain : AccountTier.prime;
+    return { allowed: false, currentTier: user.accountTier, requiredTier };
+  }
+
+  async holdIncomingCredit(input: WalletMutationInput, requiredTier: AccountTier) {
+    const existing = input.idempotencyKey
+      ? await this.prisma.transaction.findUnique({ where: { idempotencyKey: input.idempotencyKey } })
+      : null;
+    if (existing) return existing;
+    const holdExpiresAt = new Date(Date.now() + Number(process.env.MONEY_LIMIT_HOLD_HOURS ?? 24) * 60 * 60 * 1000);
+    const originalMetadata = jsonRecord(input.metadata);
+    return this.prisma.transaction.create({
+      data: {
+        userId: input.userId,
+        type: input.type,
+        status: TransactionStatus.pending,
+        amount: input.amount,
+        fee: 0,
+        totalDebit: input.amount,
+        currency: "NGN",
+        reference: input.reference,
+        provider: input.provider,
+        providerReference: input.providerReference,
+        description: input.description,
+        narration: input.narration,
+        idempotencyKey: input.idempotencyKey,
+        metadata: this.toSafeJson({
+          ...originalMetadata,
+          moneyLimitHold: true,
+          holdStatus: "pending",
+          holdExpiresAt: holdExpiresAt.toISOString(),
+          requiredTier
+        })
+      }
+    });
+  }
+
+  async processMoneyLimitHolds(userId?: string) {
+    const holds = await this.prisma.transaction.findMany({
+      where: {
+        ...(userId ? { userId } : {}),
+        type: TransactionType.wallet_funding,
+        status: TransactionStatus.pending,
+        metadata: { path: ["moneyLimitHold"], equals: true }
+      },
+      orderBy: { createdAt: "asc" },
+      take: 100
+    });
+    for (const hold of holds) {
+      const metadata = jsonRecord(hold.metadata);
+      const expiresAt = new Date(String(metadata.holdExpiresAt ?? hold.createdAt));
+      if (expiresAt.getTime() <= Date.now()) {
+        await this.reverseExpiredMoneyLimitHold(hold.id);
+        continue;
+      }
+      const assessment = await this.assessIncomingCredit(hold.userId, hold.amount);
+      if (assessment.allowed) await this.releaseMoneyLimitHold(hold.id);
+    }
+  }
+
+  private async releaseMoneyLimitHold(transactionId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const hold = await tx.transaction.findUnique({ where: { id: transactionId } });
+      if (!hold || hold.status !== TransactionStatus.pending) return null;
+      const claimed = await tx.transaction.updateMany({
+        where: { id: transactionId, status: TransactionStatus.pending },
+        data: { status: TransactionStatus.successful, completedAt: new Date(), metadata: this.holdMetadata(hold.metadata, "released") }
+      });
+      if (!claimed.count) return null;
+      const wallet = await this.ensureWalletTx(tx, hold.userId, WalletStatus.active);
+      const balanceBefore = wallet.balance;
+      const balanceAfter = balanceBefore + hold.amount;
+      await tx.wallet.update({ where: { id: wallet.id }, data: { balance: balanceAfter, status: WalletStatus.active } });
+      await tx.walletLedger.create({
+        data: {
+          walletId: wallet.id,
+          userId: hold.userId,
+          transactionId: hold.id,
+          entryType: LedgerEntryType.credit,
+          amount: hold.amount,
+          balanceBefore,
+          balanceAfter,
+          reference: hold.reference,
+          description: hold.description,
+          metadata: hold.metadata ?? undefined
+        }
+      });
+      await tx.user.update({ where: { id: hold.userId }, data: { walletStatus: WalletStatus.active } });
+      return hold;
+    });
+  }
+
+  private async reverseExpiredMoneyLimitHold(transactionId: string) {
+    const hold = await this.prisma.transaction.findUnique({ where: { id: transactionId } });
+    if (!hold || hold.status !== TransactionStatus.pending) return;
+    const metadata = jsonRecord(hold.metadata);
+    const accountNumber = String(metadata.accountNumber ?? "");
+    const bankName = String(metadata.bankName ?? "");
+    if (!accountNumber || !bankName) {
+      await this.prisma.transaction.update({
+        where: { id: hold.id },
+        data: { metadata: this.holdMetadata(hold.metadata, "reversal_needs_support", "Sender bank details are incomplete") }
+      });
+      return;
+    }
+    try {
+      const banks = await this.ngnProvider.getBanks();
+      const normalizedBank = normalizeText(bankName);
+      const bank = banks.find((item) => normalizeText(item.name) === normalizedBank)
+        ?? banks.find((item) => normalizeText(item.name).includes(normalizedBank) || normalizedBank.includes(normalizeText(item.name)));
+      if (!bank) throw new Error(`Sender bank '${bankName}' is unavailable`);
+      const resolved = await this.ngnProvider.resolveAccount(bank.code, accountNumber);
+      const reversalReference = `limit_reversal_${hold.id}`;
+      const result = await this.ngnProvider.submitTransfer({
+        amount: hold.amount,
+        accountNumber,
+        bankCode: bank.code,
+        narration: `Reversal of ${hold.reference}`,
+        reference: reversalReference,
+        nameEnquiryReference: resolved.providerReference
+      });
+      const reversalFee = providerFee(result.raw)
+        ?? Number(process.env.MONEY_LIMIT_REVERSAL_FEE ?? 0);
+      await this.prisma.$transaction([
+        this.prisma.transaction.update({
+          where: { id: hold.id },
+          data: {
+            status: result.status === "failed" ? TransactionStatus.pending : TransactionStatus.reversed,
+            providerStatus: result.status,
+            completedAt: result.status === "failed" ? null : new Date(),
+            metadata: this.holdMetadata(hold.metadata, result.status === "failed" ? "reversal_failed" : "reversed")
+          }
+        }),
+        this.prisma.transaction.upsert({
+          where: { idempotencyKey: reversalReference },
+          create: {
+            userId: hold.userId,
+            type: TransactionType.reversal,
+            status: result.status as TransactionStatus,
+            amount: hold.amount,
+            fee: reversalFee,
+            totalDebit: hold.amount + reversalFee,
+            currency: hold.currency,
+            reference: reversalReference,
+            provider: result.provider,
+            providerReference: result.providerReference,
+            description: "Money limit reversal",
+            idempotencyKey: reversalReference,
+            metadata: this.toSafeJson({ category: "money_limit_reversal", heldTransactionId: hold.id, providerResponse: result.raw })
+          },
+          update: { status: result.status as TransactionStatus, providerStatus: result.status, providerReference: result.providerReference }
+        })
+      ]);
+    } catch (error) {
+      await this.prisma.transaction.update({
+        where: { id: hold.id },
+        data: { metadata: this.holdMetadata(hold.metadata, "reversal_failed", error instanceof Error ? error.message : "Reversal failed") }
+      });
+    }
+  }
+
+  async moneyLimitReversalSummary() {
+    const where: Prisma.TransactionWhereInput = {
+      type: TransactionType.reversal,
+      metadata: { path: ["category"], equals: "money_limit_reversal" }
+    };
+    const [aggregate, count, items] = await Promise.all([
+      this.prisma.transaction.aggregate({ where, _sum: { amount: true, fee: true, totalDebit: true } }),
+      this.prisma.transaction.count({ where }),
+      this.prisma.transaction.findMany({ where, orderBy: { createdAt: "desc" }, take: 50 })
+    ]);
+    return { count, reversalAmount: aggregate._sum.amount ?? 0, providerCharges: aggregate._sum.fee ?? 0, totalSpend: aggregate._sum.totalDebit ?? 0, items };
+  }
+
+  private holdMetadata(value: Prisma.JsonValue | null, holdStatus: string, error?: string): Prisma.InputJsonValue {
+    return this.toSafeJson({ ...jsonRecord(value), holdStatus, ...(error ? { reversalError: error } : {}) });
   }
 
   async debitWallet(input: WalletMutationInput) {
@@ -506,6 +719,24 @@ export class WalletService {
 function startOfUtcDay() {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function normalizeText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function providerFee(value: unknown): number | undefined {
+  const root = jsonRecord(value);
+  const data = jsonRecord(root.data);
+  for (const candidate of [data.fee, data.transferFee, data.transactionFee, root.fee, root.transferFee, root.transactionFee]) {
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return undefined;
 }
 
 export interface WalletMutationInput {

@@ -92,7 +92,7 @@ export class StrowalletWebhookService {
 
     const sender = await this.inboundSender(payload);
     const reference = event.internalReference ?? event.providerReference ?? `strowallet_funding_${Date.now()}`;
-    const result = await this.walletService.creditWallet({
+    const creditInput: Parameters<WalletService["creditWallet"]>[0] = {
       userId: dva.userId,
       amount: event.amount,
       type: TransactionType.wallet_funding,
@@ -112,7 +112,21 @@ export class StrowalletWebhookService {
         counterpartyProfileImageUrl: sender.profileImageUrl,
         providerPayload: this.logs.sanitize(payload)
       })
-    });
+    };
+    const assessment = await this.walletService.assessIncomingCredit(dva.userId, event.amount);
+    if (!assessment.allowed) {
+      const transaction = await this.walletService.holdIncomingCredit(creditInput, assessment.requiredTier);
+      await this.logs.notifyUser({
+        userId: dva.userId,
+        title: "Funds waiting for you",
+        message: "This transfer is above your current money limit. Upgrade within 24 hours to receive it.",
+        category: "transaction",
+        type: "money_limit_hold",
+        priority: "high"
+      });
+      return { entityType: "Transaction", entityId: transaction.id };
+    }
+    const result = await this.walletService.creditWallet(creditInput);
     await this.logs.notifyUser({
       userId: dva.userId,
       title: "Wallet funded",

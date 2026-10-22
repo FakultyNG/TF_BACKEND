@@ -369,6 +369,7 @@ export class KycService {
         data: { actorId: userId, actorType: "user", action: "NIN_VERIFIED_TIER_UPGRADED", entityType: "KycRecord", entityId: recordId, metadata: { accountTier: currentTier === "prime" ? "prime" : "captain" } }
       })
     ]);
+    await this.walletService.processMoneyLimitHolds(userId).catch(() => undefined);
     await this.redis.del(`nin-failures:${userId}`);
     return {
       ninVerified: true,

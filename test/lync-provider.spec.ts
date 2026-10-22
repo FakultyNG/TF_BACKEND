@@ -75,7 +75,11 @@ describe("Lync provider integration", () => {
 
   it("masks sensitive provider log payload fields", async () => {
     const providerLog = { create: jest.fn().mockResolvedValue({ id: "log_1" }) };
-    const service = new WalletService({ providerLog } as never, {} as never);
+    const service = new WalletService(
+      { providerLog } as never,
+      {} as never,
+      {} as never
+    );
 
     await service.logProvider(
       "lync",

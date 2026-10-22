@@ -228,6 +228,15 @@ export class AdminController {
 
   @ApiBearerAuth()
   @UseGuards(AdminJwtAuthGuard, RolesGuard)
+  @Roles(UserRole.FINANCE, UserRole.SUPER_ADMIN)
+  @Get("transactions/money-limit-reversals")
+  async moneyLimitReversals(@CurrentUser() admin: { sub: string }) {
+    await this.adminService.auditAdminView(admin.sub, "ADMIN_MONEY_LIMIT_REVERSALS_VIEWED", "Transaction");
+    return success("Money limit reversal spend fetched successfully", await this.walletService.moneyLimitReversalSummary());
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(AdminJwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPPORT, UserRole.COMPLIANCE, UserRole.FINANCE, UserRole.SUPER_ADMIN)
   @Get("transactions/:transactionId")
   async transaction(@CurrentUser() admin: { sub: string; role: string }, @Param("transactionId") transactionId: string) {

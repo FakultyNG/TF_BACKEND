@@ -2841,3 +2841,14 @@ After three unsuccessful NIN/OTP attempts, the error details include `supportReq
 - `PATCH /api/v1/notifications/support/read-all` marks support notifications read when the user opens the support conversation.
 - Admin support-reply pushes default to `tf://support`; legacy ticket-specific support links are also routed to the same continuous conversation after app authentication.
 - Transfer quotes enforce the tier's daily send ceiling. Wallet credits enforce daily receive and maximum-balance ceilings. Defaults are configurable through `CITIZEN_*`, `CAPTAIN_*`, and `PRIME_*` environment variables.
+
+### Money-limit held credits
+
+- A successful DVA credit that exceeds the recipient's current daily-receive or maximum-balance limit is recorded as a `pending` `wallet_funding` transaction and is not added to the wallet ledger or balance.
+- Its transaction `metadata` includes `moneyLimitHold: true`, `holdStatus`, `holdExpiresAt`, and `requiredTier` (`captain | prime`). Sender name, bank/account, message, and profile image remain available in the same metadata.
+- Authenticated transaction list/detail responses expose those four safe hold fields at the response-item root so the mobile receipt can render without receiving private provider metadata.
+- The server rechecks held credits after tier changes and on the configured sweep. If the upgraded tier permits the credit before expiry, the original transaction becomes `successful` and the same transaction is atomically posted to the wallet ledger.
+- After the default 24-hour window, the server uses the sender bank/account from the verified webhook to return the funds. The original held transaction becomes `reversed` only after the provider accepts the reversal.
+- Reversal attempts are idempotent and are separately recorded as `reversal` transactions with `metadata.category = money_limit_reversal`.
+- `GET /api/v1/admin/transactions/money-limit-reversals` (Finance/Super Admin) returns `{ count, reversalAmount, providerCharges, totalSpend, items }` for dashboard reporting.
+- `MONEY_LIMIT_HOLD_HOURS`, `MONEY_LIMIT_HOLD_SWEEP_MS`, `MONEY_LIMIT_HOLD_SWEEP_ENABLED`, and `MONEY_LIMIT_REVERSAL_FEE` configure the lifecycle.

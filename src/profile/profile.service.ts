@@ -2,10 +2,14 @@ import { HttpStatus, Injectable } from "@nestjs/common";
 import { ApiException } from "../common/errors/api.exception";
 import { PrismaService } from "../prisma/prisma.service";
 import { UpdateProfileDto } from "./dto/update-profile.dto";
+import { WalletService } from "../wallet/wallet.service";
 
 @Injectable()
 export class ProfileService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly walletService: WalletService
+  ) {}
 
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -79,6 +83,9 @@ export class ProfileService {
         metadata: data
       }
     });
+    if (data.accountTier) {
+      await this.walletService.processMoneyLimitHolds(userId).catch(() => undefined);
+    }
     return this.toProfileResponse(updated);
   }
 

@@ -181,6 +181,7 @@ describe("Strowallet webhooks", () => {
       auditLog: { create: jest.fn() }
     };
     const wallet = {
+      assessIncomingCredit: jest.fn().mockResolvedValue({ allowed: true, currentTier: "citizen" }),
       creditWallet: jest.fn().mockResolvedValue({ transaction: { id: "txn_1" } })
     };
     const logs = {

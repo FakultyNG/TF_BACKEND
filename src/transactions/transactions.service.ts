@@ -109,7 +109,11 @@ export class TransactionsService {
       bankCode: typeof value.bankCode === "string" ? value.bankCode : undefined,
       counterpartyProfileImageUrl:
         typeof value.counterpartyProfileImageUrl === "string" ? value.counterpartyProfileImageUrl : undefined,
-      memo: typeof value.memo === "string" ? value.memo : undefined
+      memo: typeof value.memo === "string" ? value.memo : undefined,
+      moneyLimitHold: value.moneyLimitHold === true,
+      holdStatus: typeof value.holdStatus === "string" ? value.holdStatus : undefined,
+      holdExpiresAt: typeof value.holdExpiresAt === "string" ? value.holdExpiresAt : undefined,
+      requiredTier: typeof value.requiredTier === "string" ? value.requiredTier : undefined
     };
   }
 }
