@@ -276,7 +276,7 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async assessIncomingCredit(userId: string, amount: number) {
+  async assessIncomingCredit(userId: string, amount: number): Promise<IncomingCreditAssessment> {
     const [user, wallet, received] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: userId }, select: { accountTier: true } }),
       this.getOrCreateWallet(userId),
@@ -757,3 +757,7 @@ export interface WalletMutationInput {
   payoutCurrency?: string;
   metadata?: Prisma.InputJsonValue;
 }
+
+type IncomingCreditAssessment =
+  | { allowed: true; currentTier: AccountTier; requiredTier?: never }
+  | { allowed: false; currentTier: AccountTier; requiredTier: AccountTier };
