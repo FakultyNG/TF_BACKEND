@@ -99,7 +99,7 @@ describe("Strowallet provider", () => {
 
   it("submits NGN transfers with the name enquiry reference", async () => {
     const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_test" }), {} as never);
-    jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+    const request = jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
       merchantTxRef: "STW123",
       status: "success"
     });
@@ -117,6 +117,64 @@ describe("Strowallet provider", () => {
       provider: "strowallet",
       providerReference: "STW123",
       status: "successful"
+    });
+    expect(request).toHaveBeenCalledWith("post", "/api/banks/request/", undefined, {
+      public_key: "pk_test",
+      amount: "1000",
+      bank_code: "044",
+      account_number: "0123456789",
+      narration: "TF Transfer",
+      name_enquiry_reference: "name_ref_1",
+      SenderName: "Transfa",
+      mode: "live"
+    });
+  });
+
+  it("normalizes alternate Strowallet name-enquiry reference keys", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_test" }), {} as never);
+    jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+      data: {
+        account_name: "ADA LOVELACE",
+        bank_name: "Access Bank",
+        session_id: "name_ref_2"
+      }
+    });
+
+    await expect(service.resolveAccount("044", "0123456789")).resolves.toMatchObject({
+      accountName: "ADA LOVELACE",
+      providerReference: "name_ref_2"
+    });
+  });
+
+  it("does not submit a transfer without Strowallet's required name-enquiry reference", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_test" }), {} as never);
+    const request = jest.spyOn((service as never) as { request: jest.Mock }, "request");
+
+    await expect(service.submitTransfer({
+      amount: 1000,
+      accountNumber: "0123456789",
+      bankCode: "044",
+      reference: "txn_1"
+    })).rejects.toMatchObject({ code: "STROWALLET_NAME_ENQUIRY_REFERENCE_MISSING" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("returns an actionable error when Strowallet rejects the transfer", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_test" }), {} as never);
+    jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+      success: false,
+      error: { message: "Insufficient wallet balance" }
+    });
+
+    await expect(service.submitTransfer({
+      amount: 1000,
+      accountNumber: "0123456789",
+      bankCode: "044",
+      reference: "txn_1",
+      nameEnquiryReference: "name_ref_1"
+    })).rejects.toMatchObject({
+      code: "STROWALLET_TRANSFER_REJECTED",
+      message: "Strowallet payout balance is insufficient; fund the live Strowallet account and try again"
     });
   });
 

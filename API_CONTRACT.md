@@ -941,10 +941,25 @@ POST /transfers/ngn/resolve-account
     "accountName": "JOHN DOE",
     "accountNumber": "0123456789",
     "bankCode": "044",
-    "bankName": "Access Bank"
+    "bankName": "Access Bank",
+    "transfaUserMatched": true,
+    "transfaUserId": "cm_user_id",
+    "profileImageUrl": "https://cdn.example.com/cashdrop-profile.jpg"
   }
 }
 ```
+
+`transfaUserMatched` is true only when the live resolved account number, or the
+resolved account name, exactly matches an active Transfa user's active DVA at
+the same bank. `profileImageUrl` is populated only from that user's active
+CashDrop profile; otherwise both nullable fields are `null` and the mobile app
+renders the resolved account-name initials.
+
+When Strowallet is the live banking provider, account resolution must also
+return the provider's name-enquiry reference. The backend accepts Strowallet's
+documented and legacy reference-key variants, stores the normalized reference
+inside the server-side quote, and never exposes it to the mobile client. If it
+is absent, resolution fails before a wallet debit can be attempted.
 
 3. Suggest Banks by Account Number
 
@@ -1069,6 +1084,14 @@ user's 5-digit `passcode` instead.
   }
 }
 ```
+
+For Strowallet failures, the backend returns a provider-safe actionable error
+code such as `STROWALLET_NAME_ENQUIRY_REFERENCE_MISSING`,
+`STROWALLET_TRANSFER_REQUEST_FAILED`, or `STROWALLET_TRANSFER_REJECTED`.
+Rejected submissions are reversed automatically and cannot leave the user's
+wallet debited. Messages distinguish live credential/mode problems, provider
+payout balance, beneficiary verification expiry, amount limits, and temporary
+provider outages without exposing credentials or raw provider payloads.
 
 
 # USD TRANSFER

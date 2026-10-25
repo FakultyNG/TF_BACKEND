@@ -43,8 +43,15 @@ export class TransfersService {
     return banks;
   }
 
-  resolveAccount(bankCode: string, accountNumber: string) {
-    return this.ngnProvider.resolveAccount(bankCode, accountNumber);
+  async resolveAccount(bankCode: string, accountNumber: string, requesterUserId?: string) {
+    const account = await this.ngnProvider.resolveAccount(bankCode, accountNumber);
+    const recipient = await this.findTransfaRecipient(account, requesterUserId);
+    return {
+      ...account,
+      transfaUserMatched: recipient !== null,
+      transfaUserId: recipient?.userId ?? null,
+      profileImageUrl: recipient?.profileImageUrl ?? null
+    };
   }
 
   async suggestBanksByAccountNumber(accountNumber: string) {
@@ -115,7 +122,7 @@ export class TransfersService {
     if (balance.balance < totalDebit) {
       throw new ApiException("Insufficient wallet balance", "INSUFFICIENT_BALANCE", HttpStatus.BAD_REQUEST);
     }
-    const account = await this.resolveAccount(dto.bankCode, dto.accountNumber);
+    const account = await this.ngnProvider.resolveAccount(dto.bankCode, dto.accountNumber);
     const quoteId = `quote_ngn_${uuid().replace(/-/g, "").slice(0, 12)}`;
     const expiresAt = new Date(Date.now() + this.quoteTtlSeconds * 1000).toISOString();
     const quote: NgnQuote = {
@@ -352,6 +359,58 @@ export class TransfersService {
     const a = normalize(left);
     const b = normalize(right);
     return Boolean(a && b && (a === b || a.includes(b) || b.includes(a)));
+  }
+
+  private async findTransfaRecipient(
+    account: { accountName: string; accountNumber: string; bankName: string },
+    requesterUserId?: string
+  ) {
+    if (!this.prisma) return null;
+    const candidates = await this.prisma.dedicatedVirtualAccount.findMany({
+      where: {
+        status: "active",
+        ...(requesterUserId ? { userId: { not: requesterUserId } } : {}),
+        OR: [
+          { accountNumber: account.accountNumber },
+          { accountName: { equals: account.accountName, mode: "insensitive" } }
+        ]
+      },
+      take: 25,
+      select: {
+        userId: true,
+        accountNumber: true,
+        accountName: true,
+        bankName: true,
+        user: {
+          select: {
+            status: true,
+            cashDropProfile: {
+              select: { status: true, profileImageUrl: true }
+            }
+          }
+        }
+      }
+    });
+    const active = candidates.filter((candidate) => candidate.user.status === "active");
+    const sameBank = (candidate: (typeof active)[number]) => this.sameBank(candidate.bankName, account.bankName);
+    const match =
+      active.find((candidate) => candidate.accountNumber === account.accountNumber && sameBank(candidate)) ??
+      active.find(
+        (candidate) =>
+          this.exactName(candidate.accountName) === this.exactName(account.accountName) && sameBank(candidate)
+      );
+    if (!match) return null;
+    return {
+      userId: match.userId,
+      profileImageUrl:
+        match.user.cashDropProfile?.status === "active"
+          ? match.user.cashDropProfile.profileImageUrl
+          : null
+    };
+  }
+
+  private exactName(value: string) {
+    return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("en-NG");
   }
 
   private stringValue(value: unknown) {

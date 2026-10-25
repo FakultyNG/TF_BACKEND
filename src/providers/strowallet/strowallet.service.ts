@@ -146,12 +146,31 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
     if (!accountName) {
       throw new ApiException("Account could not be resolved", "ACCOUNT_RESOLVE_FAILED", HttpStatus.BAD_REQUEST);
     }
+    const providerReference = firstString(
+      body.name_enquiry_reference,
+      body.name_enquiry_ref,
+      body.nameEnquiryReference,
+      body.nameEnquiryRef,
+      body.sessionId,
+      body.sessionID,
+      body.session_id,
+      body.requestReference,
+      body.request_reference,
+      body.reference
+    );
+    if (!providerReference) {
+      throw new ApiException(
+        "Strowallet verified the account but did not return the transfer reference; please select the bank and verify again",
+        "STROWALLET_NAME_ENQUIRY_REFERENCE_MISSING",
+        HttpStatus.BAD_GATEWAY
+      );
+    }
     return {
       accountName,
       accountNumber,
       bankCode,
       bankName: firstString(body.bankName, body.bank_name, body.bank) || bankCode,
-      providerReference: firstString(body.name_enquiry_reference, body.nameEnquiryReference, body.sessionId, body.sessionID, body.reference)
+      providerReference
     };
   }
 
@@ -164,17 +183,33 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
     nameEnquiryReference?: string;
     senderName?: string;
   }): Promise<NgnTransferResult> {
-    const raw = await this.post(this.config.get<string>("STROWALLET_BANK_TRANSFER_PATH", "/api/banks/request/"), undefined, {
+    if (!input.nameEnquiryReference?.trim()) {
+      throw new ApiException(
+        "Strowallet did not return the name-enquiry reference required to complete this transfer",
+        "STROWALLET_NAME_ENQUIRY_REFERENCE_MISSING",
+        HttpStatus.BAD_GATEWAY
+      );
+    }
+    const raw = await this.post(this.transferPath(), undefined, {
       public_key: this.publicKey(),
       amount: String(input.amount),
       bank_code: input.bankCode,
       account_number: input.accountNumber,
       narration: input.narration || "Transfa transfer",
-      name_enquiry_reference: input.nameEnquiryReference || input.reference,
+      name_enquiry_reference: input.nameEnquiryReference.trim(),
       SenderName: input.senderName || this.config.get<string>("STROWALLET_SENDER_NAME", "Transfa"),
       mode: this.mode()
     });
     const body = unwrap(raw);
+    const responseMessage = responseProviderMessage(raw);
+    if (transferResponseRejected(raw)) {
+      throw new ApiException(
+        publicTransferError(responseMessage),
+        "STROWALLET_TRANSFER_REJECTED",
+        HttpStatus.BAD_GATEWAY,
+        providerResponseDiagnostics(raw)
+      );
+    }
     return {
       status: normalizeTransferStatus(firstString(body.status, body.transferStatus)) ?? "processing",
       provider: "strowallet",
@@ -288,13 +323,20 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
       this.logger.warn({ provider: "strowallet", method, url, message, ...diagnostics });
       const isDvaRequest = url === this.config.get<string>("STROWALLET_DVA_PATH", "/api/virtual-bank/new-customer/") ||
         url === this.config.get<string>("STROWALLET_STERLING_DVA_PATH", "/api/virtual-bank/sterling");
+      const isTransferRequest = samePath(url, this.transferPath());
       throw new ApiException(
         url === this.config.get<string>("STROWALLET_BVN_DETAILS_PATH", "/api/kyc_getbvn/")
           ? "Strowallet BVN details request failed"
           : isDvaRequest
           ? publicDvaError(message)
+          : isTransferRequest
+          ? publicTransferError(message)
           : "Strowallet provider request failed",
-        isDvaRequest ? "STROWALLET_DVA_REQUEST_FAILED" : "STROWALLET_PROVIDER_ERROR",
+        isDvaRequest
+          ? "STROWALLET_DVA_REQUEST_FAILED"
+          : isTransferRequest
+          ? "STROWALLET_TRANSFER_REQUEST_FAILED"
+          : "STROWALLET_PROVIDER_ERROR",
         HttpStatus.BAD_GATEWAY,
         diagnostics
       );
@@ -309,6 +351,11 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
 
   private mode() {
     return this.config.get<string>("STROWALLET_MODE", "live").trim().toLowerCase();
+  }
+
+  private transferPath() {
+    const path = this.config.get<string>("STROWALLET_BANK_TRANSFER_PATH", "/api/banks/request/").trim();
+    return path.endsWith("/") ? path : `${path}/`;
   }
 
   private dvaPath(preferredBank?: string) {
@@ -438,14 +485,26 @@ function failureStatus(value?: string) {
   return ["fail", "invalid", "error", "declined"].some((item) => value.toLowerCase().includes(item));
 }
 
+function transferResponseRejected(value: unknown) {
+  const root = objectOrEmpty(value);
+  const body = unwrap(value);
+  if (root.success === false || body.success === false) return true;
+  const status = firstString(body.status, body.transferStatus, body.responseCode, body.response_code);
+  if (failureStatus(status)) return true;
+  if (status && /^4\d\d$|^5\d\d$/.test(status)) return true;
+  return failureStatus(responseProviderMessage(value));
+}
+
 function stripUndefined(value?: Record<string, string | number | undefined>) {
   return Object.fromEntries(Object.entries(value ?? {}).filter(([, child]) => child !== undefined));
 }
 
 function providerMessage(error: unknown) {
   if (!axios.isAxiosError(error)) return error instanceof Error ? error.message : "Strowallet request failed";
-  const axiosError = error as AxiosError<{ message?: string; detail?: string; error?: string }>;
-  return axiosError.response?.data?.message || axiosError.response?.data?.detail || axiosError.response?.data?.error || axiosError.message;
+  const axiosError = error as AxiosError<unknown>;
+  return axiosError.response?.data === undefined
+    ? axiosError.message
+    : responseProviderMessage(axiosError.response.data);
 }
 
 function providerDiagnostics(error: unknown) {
@@ -456,6 +515,63 @@ function providerDiagnostics(error: unknown) {
     providerCode: firstString(body.code, body.responseCode, body.response_code),
     requestId: firstString(body.requestId, body.request_id, body.reference)
   });
+}
+
+function providerResponseDiagnostics(value: unknown) {
+  const body = unwrap(value);
+  return stripUndefined({
+    providerCode: firstString(body.code, body.responseCode, body.response_code),
+    requestId: firstString(body.requestId, body.request_id, body.reference, body.merchantTxRef, body.merchant_tx_ref)
+  });
+}
+
+function responseProviderMessage(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  const root = objectOrEmpty(value);
+  const body = unwrap(value);
+  const error = objectOrEmpty(root.error);
+  const errors = Array.isArray(root.errors) ? root.errors : [];
+  return firstString(
+    body.message,
+    body.detail,
+    body.description,
+    body.responseMessage,
+    body.response_message,
+    error.message,
+    error.detail,
+    errors[0],
+    objectOrEmpty(errors[0]).message
+  ) || "Strowallet rejected the transfer request";
+}
+
+function publicTransferError(message: string) {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("balance") || normalized.includes("insufficient fund")) {
+    return "Strowallet payout balance is insufficient; fund the live Strowallet account and try again";
+  }
+  if (normalized.includes("name") && (normalized.includes("enquiry") || normalized.includes("reference"))) {
+    return "The beneficiary verification expired or was rejected; verify the account again and retry";
+  }
+  if (normalized.includes("public key") || normalized.includes("api key") || normalized.includes("unauthor") || normalized.includes("credential")) {
+    return "Strowallet rejected the live transfer credentials";
+  }
+  if (normalized.includes("mode") || normalized.includes("sandbox") || normalized.includes("live")) {
+    return "Strowallet rejected the configured live transfer mode";
+  }
+  if (normalized.includes("account") && (normalized.includes("invalid") || normalized.includes("not found"))) {
+    return "Strowallet rejected the beneficiary account; verify the account and bank again";
+  }
+  if (normalized.includes("amount") || normalized.includes("minimum") || normalized.includes("limit")) {
+    return "Strowallet rejected the transfer amount or provider limit";
+  }
+  if (normalized.includes("timeout") || normalized.includes("network") || normalized.includes("temporar") || normalized.includes("unavailable")) {
+    return "Strowallet transfer service is temporarily unavailable; please try again";
+  }
+  return "Strowallet rejected the live transfer; check payout access and provider account status";
+}
+
+function samePath(left: string, right: string) {
+  return left.replace(/\/+$/g, "") === right.replace(/\/+$/g, "");
 }
 
 function publicDvaError(message: string) {

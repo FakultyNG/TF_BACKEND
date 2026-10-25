@@ -25,8 +25,8 @@ export class TransfersController {
   }
 
   @Post("ngn/resolve-account")
-  async resolve(@Body() dto: ResolveAccountDto) {
-    const data = await this.transfersService.resolveAccount(dto.bankCode, dto.accountNumber);
+  async resolve(@CurrentUser() user: { sub: string }, @Body() dto: ResolveAccountDto) {
+    const data = await this.transfersService.resolveAccount(dto.bankCode, dto.accountNumber, user.sub);
     return success("Account resolved successfully", data);
   }
 
