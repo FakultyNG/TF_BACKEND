@@ -1,4 +1,5 @@
 import { ConfigService } from "@nestjs/config";
+import { AxiosError } from "axios";
 import { StrowalletService } from "../src/providers/strowallet/strowallet.service";
 import { StrowalletWebhookService } from "../src/webhooks/strowallet/strowallet-webhook.service";
 
@@ -175,6 +176,35 @@ describe("Strowallet provider", () => {
     })).rejects.toMatchObject({
       code: "STROWALLET_TRANSFER_REJECTED",
       message: "Strowallet payout balance is insufficient; fund the live Strowallet account and try again"
+    });
+  });
+
+  it("distinguishes live-transfer permission rejection from an invalid public key", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_live_secret" }), {} as never);
+    const http = (service as unknown as { http: { request: jest.Mock } }).http;
+    jest.spyOn(http, "request").mockRejectedValue(new AxiosError(
+      "Request failed with status code 403",
+      "ERR_BAD_REQUEST",
+      undefined,
+      undefined,
+      {
+        status: 403,
+        statusText: "Forbidden",
+        headers: {},
+        config: {} as never,
+        data: { message: "Bank transfer permission is not allowed for this API key" }
+      }
+    ));
+
+    await expect(service.submitTransfer({
+      amount: 1000,
+      accountNumber: "0123456789",
+      bankCode: "044",
+      reference: "txn_1",
+      nameEnquiryReference: "name_ref_1"
+    })).rejects.toMatchObject({
+      code: "STROWALLET_TRANSFER_REQUEST_FAILED",
+      message: "Strowallet has not authorized live bank transfers for this account: Bank transfer permission is not allowed for this API key"
     });
   });
 

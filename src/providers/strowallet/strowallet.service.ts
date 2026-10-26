@@ -510,10 +510,12 @@ function providerMessage(error: unknown) {
 function providerDiagnostics(error: unknown) {
   if (!axios.isAxiosError(error)) return undefined;
   const body = objectOrEmpty(error.response?.data);
+  const providerReason = safeProviderReason(providerMessage(error));
   return stripUndefined({
     providerStatus: error.response?.status,
     providerCode: firstString(body.code, body.responseCode, body.response_code),
-    requestId: firstString(body.requestId, body.request_id, body.reference)
+    requestId: firstString(body.requestId, body.request_id, body.reference),
+    providerReason
   });
 }
 
@@ -521,7 +523,8 @@ function providerResponseDiagnostics(value: unknown) {
   const body = unwrap(value);
   return stripUndefined({
     providerCode: firstString(body.code, body.responseCode, body.response_code),
-    requestId: firstString(body.requestId, body.request_id, body.reference, body.merchantTxRef, body.merchant_tx_ref)
+    requestId: firstString(body.requestId, body.request_id, body.reference, body.merchantTxRef, body.merchant_tx_ref),
+    providerReason: safeProviderReason(responseProviderMessage(value))
   });
 }
 
@@ -552,8 +555,11 @@ function publicTransferError(message: string) {
   if (normalized.includes("name") && (normalized.includes("enquiry") || normalized.includes("reference"))) {
     return "The beneficiary verification expired or was rejected; verify the account again and retry";
   }
-  if (normalized.includes("public key") || normalized.includes("api key") || normalized.includes("unauthor") || normalized.includes("credential")) {
-    return "Strowallet rejected the live transfer credentials";
+  if (normalized.includes("unauthor") || normalized.includes("forbidden") || normalized.includes("permission") || normalized.includes("not allowed")) {
+    return `Strowallet has not authorized live bank transfers for this account: ${safeProviderReason(message)}`;
+  }
+  if (normalized.includes("public key") || normalized.includes("api key") || normalized.includes("credential")) {
+    return `Strowallet rejected STROWALLET_PUBLIC_KEY: ${safeProviderReason(message)}`;
   }
   if (normalized.includes("mode") || normalized.includes("sandbox") || normalized.includes("live")) {
     return "Strowallet rejected the configured live transfer mode";
@@ -568,6 +574,14 @@ function publicTransferError(message: string) {
     return "Strowallet transfer service is temporarily unavailable; please try again";
   }
   return "Strowallet rejected the live transfer; check payout access and provider account status";
+}
+
+function safeProviderReason(message: string) {
+  const compact = message.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 240);
+  if (!compact) return "No reason was returned by the provider";
+  return compact
+    .replace(/(public[_ -]?key|api[_ -]?key|secret|token)(\s*[:=]\s*)([^\s,;]+)/gi, "$1$2[redacted]")
+    .replace(/\b(?:pk|sk)_(?:live|test)_[A-Za-z0-9_-]+\b/g, "[redacted]");
 }
 
 function samePath(left: string, right: string) {

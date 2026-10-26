@@ -1091,7 +1091,10 @@ code such as `STROWALLET_NAME_ENQUIRY_REFERENCE_MISSING`,
 Rejected submissions are reversed automatically and cannot leave the user's
 wallet debited. Messages distinguish live credential/mode problems, provider
 payout balance, beneficiary verification expiry, amount limits, and temporary
-provider outages without exposing credentials or raw provider payloads.
+provider outages without exposing credentials or raw provider payloads. Safe
+provider rejection text is retained in `error.details.providerReason`, and the
+public message distinguishes an invalid `STROWALLET_PUBLIC_KEY` from a valid
+account that has not been authorized for live bank transfers.
 
 
 # USD TRANSFER
