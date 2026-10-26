@@ -284,8 +284,10 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
   async verifyVirtualAccountWebhook(payload: unknown) {
     if (!this.webhookVerificationEnabled()) return true;
     const body = objectOrEmpty(payload);
-    const sessionID = firstString(body.sessionId, body.sessionID);
-    const amount = firstNumber(body.transactionAmount, body.amount, body.settledAmount);
+    const data = objectOrEmpty(body.data);
+    const transfer = objectOrEmpty(data.transfer);
+    const sessionID = firstString(body.sessionId, body.sessionID, data.sessionId, data.sessionID, transfer.sessionId, transfer.sessionID);
+    const amount = firstNumber(body.transactionAmount, body.amount, body.settledAmount, data.transactionAmount, data.amount, data.settledAmount, transfer.transactionAmount, transfer.amount);
     if (!sessionID || !amount) return false;
     const raw = await this.get(this.config.get<string>("STROWALLET_VERIFY_SESSION_PATH", "/api/verifysessionid/"), {
       amount: String(amount),

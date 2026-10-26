@@ -50,6 +50,8 @@ POST /api/v1/webhooks/sendchamp
 
 Provider webhook routes are not JWT-protected. They must verify the provider signature using the matching webhook secret, store a `WebhookLog`, normalize the event, enforce idempotency, and then update Transfa ledger/transaction/KYC state. Duplicate valid webhooks must return success without repeating wallet credit, reversal, or KYC activation.
 
+Strowallet callback URLs are `POST /api/v1/webhooks/strowallet/virtual-account` for DVA credits and `POST /api/v1/webhooks/strowallet/bank-transfer` for outgoing-transfer status. Both paths also accept `GET` provider/dashboard health probes and always acknowledge callback delivery with HTTP 200; unverified or malformed payloads are logged and are never applied to wallet or transaction state.
+
 Sendchamp webhooks are delivery-status logs only. They must not verify OTPs, mark OTP sessions verified, log raw OTP codes, or change auth state. OTP verification remains controlled by the backend calling Sendchamp `/verification/confirm` from `POST /auth/otp/validate`.
 
 ---

@@ -227,6 +227,23 @@ describe("Strowallet provider", () => {
     );
   });
 
+  it("verifies nested virtual-account webhook details", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_live" }), {} as never);
+    const request = jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+      success: true
+    });
+
+    await expect(service.verifyVirtualAccountWebhook({
+      data: { sessionID: "SESSION-NESTED-1", transactionAmount: 500 }
+    })).resolves.toBe(true);
+    expect(request).toHaveBeenCalledWith(
+      "get",
+      "/api/verifysessionid/",
+      undefined,
+      { public_key: "pk_live", amount: "500", sessionID: "SESSION-NESTED-1" }
+    );
+  });
+
   it("uses the live BVN details endpoint and returns the identity needed for selfie verification", async () => {
     const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: " pk_live " }), {} as never);
     const request = jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
@@ -358,6 +375,35 @@ describe("Strowallet webhooks", () => {
       success: true,
       message: "Strowallet bank-transfer webhook is ready"
     });
+  });
+
+  it("always acknowledges virtual-account probes and callbacks", async () => {
+    const service = { receiveVirtualAccountCredit: jest.fn().mockRejectedValue(new Error("temporary database error")) };
+    const controller = new StrowalletWebhookController(service as never);
+
+    await expect(controller.receiveVirtualAccountCredit({ event: "dashboard.test" })).resolves.toEqual({
+      success: true,
+      message: "Webhook received"
+    });
+    expect(controller.virtualAccountHealth()).toEqual({
+      success: true,
+      message: "Strowallet virtual-account webhook is ready"
+    });
+  });
+
+  it("acknowledges but does not process an unverified virtual-account callback", async () => {
+    const logs = {
+      createReceived: jest.fn().mockResolvedValue({ id: "log_1" }),
+      markFailed: jest.fn()
+    };
+    const strowallet = { verifyVirtualAccountWebhook: jest.fn().mockResolvedValue(false) };
+    const service = new StrowalletWebhookService({} as never, {} as never, logs as never, strowallet as never);
+
+    await expect(service.receiveVirtualAccountCredit({ event: "dashboard.test" })).resolves.toEqual({
+      duplicate: false,
+      accepted: false
+    });
+    expect(logs.markFailed).toHaveBeenCalledWith("log_1", expect.stringContaining("could not be verified"));
   });
 
   it("credits the matched DVA owner from virtual-account webhooks", async () => {

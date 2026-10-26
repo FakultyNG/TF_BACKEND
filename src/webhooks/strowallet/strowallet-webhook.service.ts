@@ -1,6 +1,5 @@
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { LedgerEntryType, Prisma, TransactionStatus, TransactionType } from "@prisma/client";
-import { ApiException } from "../../common/errors/api.exception";
 import { PrismaService } from "../../prisma/prisma.service";
 import { StrowalletService } from "../../providers/strowallet/strowallet.service";
 import { WalletService } from "../../wallet/wallet.service";
@@ -19,12 +18,18 @@ export class StrowalletWebhookService {
   ) {}
 
   async receiveVirtualAccountCredit(payload: unknown) {
-    const verified = await this.strowallet.verifyVirtualAccountWebhook(payload);
     const event = this.normalizeVirtualAccountCredit(payload);
+    let verified = false;
+    let verificationError = "Strowallet virtual account webhook could not be verified";
+    try {
+      verified = await this.strowallet.verifyVirtualAccountWebhook(payload);
+    } catch (error) {
+      verificationError = error instanceof Error ? error.message : verificationError;
+    }
     const log = await this.logs.createReceived(this.provider, event, payload, verified);
     if (!verified) {
-      await this.logs.markFailed(log.id, "Strowallet virtual account webhook could not be verified");
-      throw new ApiException("Invalid Strowallet webhook", "INVALID_STROWALLET_WEBHOOK", HttpStatus.UNAUTHORIZED);
+      await this.logs.markFailed(log.id, verificationError);
+      return { duplicate: false, accepted: false };
     }
     return this.process(log.id, event, payload, "virtual-account");
   }
@@ -259,14 +264,16 @@ export class StrowalletWebhookService {
 
   private normalizeVirtualAccountCredit(payload: unknown): NormalizedWebhookEvent {
     const body = asRecord(payload);
+    const data = asRecord(body.data);
+    const transfer = asRecord(data.transfer);
     return {
-      eventType: "virtual_account.credit",
-      providerReference: firstString(body.sessionId, body.sessionID, body.settlementId),
-      internalReference: firstString(body.initiationTranRef),
-      status: TransactionStatus.successful,
-      amount: firstNumber(body.transactionAmount, body.amount, body.settledAmount),
-      currency: firstString(body.currency) || "NGN",
-      accountNumber: firstString(body.accountNumber, body.account_number)
+      eventType: firstString(body.event, body.eventType, body.type, data.event, data.eventType, data.type) || "virtual_account.credit",
+      providerReference: firstString(body.sessionId, body.sessionID, body.settlementId, data.sessionId, data.sessionID, data.settlementId, transfer.sessionId, transfer.sessionID),
+      internalReference: firstString(body.initiationTranRef, data.initiationTranRef, transfer.initiationTranRef),
+      status: normalizeProviderStatus(firstString(body.status, data.status, transfer.status) || "successful"),
+      amount: firstNumber(body.transactionAmount, body.amount, body.settledAmount, data.transactionAmount, data.amount, data.settledAmount, transfer.transactionAmount, transfer.amount),
+      currency: firstString(body.currency, data.currency, transfer.currency) || "NGN",
+      accountNumber: firstString(body.accountNumber, body.account_number, data.accountNumber, data.account_number, transfer.accountNumber, transfer.account_number)
     };
   }
 

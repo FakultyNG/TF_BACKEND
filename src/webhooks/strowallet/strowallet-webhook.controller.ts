@@ -9,15 +9,34 @@ export class StrowalletWebhookController {
 
   constructor(private readonly service: StrowalletWebhookService) {}
 
+  @Get("virtual-account")
+  @HttpCode(200)
+  @ApiExcludeEndpoint()
+  virtualAccountHealth() {
+    return { success: true, message: "Strowallet virtual-account webhook is ready" };
+  }
+
   @Post("virtual-account")
   @HttpCode(200)
   @ApiExcludeEndpoint()
   async receiveVirtualAccountCredit(@Body() dto: Record<string, unknown>) {
-    const result = await this.service.receiveVirtualAccountCredit(dto);
-    return {
-      success: true,
-      message: result.duplicate ? "Duplicate webhook ignored" : "Webhook received"
-    };
+    try {
+      const result = await this.service.receiveVirtualAccountCredit(dto);
+      return {
+        success: true,
+        message: result.duplicate
+          ? "Duplicate webhook ignored"
+          : "accepted" in result && result.accepted === false
+          ? "Webhook received but could not be verified"
+          : "Webhook received"
+      };
+    } catch (error) {
+      this.logger.error(
+        "Strowallet virtual-account webhook was acknowledged after processing failed",
+        error instanceof Error ? error.stack : undefined
+      );
+      return { success: true, message: "Webhook received" };
+    }
   }
 
   @Get("bank-transfer")
