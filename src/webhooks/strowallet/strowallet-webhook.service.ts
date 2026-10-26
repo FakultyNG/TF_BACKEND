@@ -30,12 +30,18 @@ export class StrowalletWebhookService {
   }
 
   async receiveBankTransfer(payload: unknown) {
-    const verified = await this.strowallet.verifyTransferWebhook(payload);
     const event = this.normalizeBankTransfer(payload);
+    let verified = false;
+    let verificationError = "Strowallet bank transfer webhook could not be verified";
+    try {
+      verified = await this.strowallet.verifyTransferWebhook(payload);
+    } catch (error) {
+      verificationError = error instanceof Error ? error.message : verificationError;
+    }
     const log = await this.logs.createReceived(this.provider, event, payload, verified);
     if (!verified) {
-      await this.logs.markFailed(log.id, "Strowallet bank transfer webhook could not be verified");
-      throw new ApiException("Invalid Strowallet webhook", "INVALID_STROWALLET_WEBHOOK", HttpStatus.UNAUTHORIZED);
+      await this.logs.markFailed(log.id, verificationError);
+      return { duplicate: false, accepted: false };
     }
     return this.process(log.id, event, payload, "bank-transfer");
   }
@@ -266,15 +272,56 @@ export class StrowalletWebhookService {
 
   private normalizeBankTransfer(payload: unknown): NormalizedWebhookEvent {
     const body = asRecord(payload);
-    const status = firstString(body.status);
+    const data = asRecord(body.data);
+    const transfer = asRecord(data.transfer);
+    const status = firstString(
+      body.status,
+      body.transferStatus,
+      body.transfer_status,
+      data.status,
+      data.transferStatus,
+      data.transfer_status,
+      transfer.status
+    );
     return {
-      eventType: firstString(body.event) || "banktransfer.unknown",
-      providerReference: firstString(body.merchantTxRef, body.merchant_tx_ref, body.sessionId, body.sessionID),
-      internalReference: firstString(body.merchantTxRef, body.merchant_tx_ref),
+      eventType: firstString(body.event, body.eventType, body.type, data.event, data.eventType, data.type) || "banktransfer.unknown",
+      providerReference: firstString(
+        body.merchantTxRef,
+        body.merchant_tx_ref,
+        body.sessionId,
+        body.sessionID,
+        body.providerReference,
+        body.provider_reference,
+        data.merchantTxRef,
+        data.merchant_tx_ref,
+        data.sessionId,
+        data.sessionID,
+        data.providerReference,
+        data.provider_reference,
+        transfer.merchantTxRef,
+        transfer.merchant_tx_ref
+      ),
+      internalReference: firstString(
+        body.internalReference,
+        body.internal_reference,
+        body.transactionReference,
+        body.transaction_reference,
+        data.internalReference,
+        data.internal_reference,
+        data.transactionReference,
+        data.transaction_reference
+      ),
       status: status ? normalizeProviderStatus(status) : undefined,
-      amount: firstNumber(body.amount),
-      currency: "NGN",
-      accountNumber: firstString(body.accountNumber, body.account_number)
+      amount: firstNumber(body.amount, data.amount, transfer.amount),
+      currency: firstString(body.currency, data.currency, transfer.currency) || "NGN",
+      accountNumber: firstString(
+        body.accountNumber,
+        body.account_number,
+        data.accountNumber,
+        data.account_number,
+        transfer.accountNumber,
+        transfer.account_number
+      )
     };
   }
 

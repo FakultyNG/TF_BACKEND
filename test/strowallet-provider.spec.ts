@@ -1,6 +1,8 @@
 import { ConfigService } from "@nestjs/config";
+import { TransactionStatus } from "@prisma/client";
 import { AxiosError } from "axios";
 import { StrowalletService } from "../src/providers/strowallet/strowallet.service";
+import { StrowalletWebhookController } from "../src/webhooks/strowallet/strowallet-webhook.controller";
 import { StrowalletWebhookService } from "../src/webhooks/strowallet/strowallet-webhook.service";
 
 const config = (values: Record<string, string> = {}) => ({
@@ -208,6 +210,23 @@ describe("Strowallet provider", () => {
     });
   });
 
+  it("verifies nested bank-transfer webhook references", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_live" }), {} as never);
+    const request = jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+      success: true
+    });
+
+    await expect(service.verifyTransferWebhook({
+      data: { merchant_tx_ref: "STW-NESTED-1" }
+    })).resolves.toBe(true);
+    expect(request).toHaveBeenCalledWith(
+      "get",
+      "/api/VerifyWebHookTranfer",
+      undefined,
+      { public_key: "pk_live", merchantTxRef: "STW-NESTED-1" }
+    );
+  });
+
   it("uses the live BVN details endpoint and returns the identity needed for selfie verification", async () => {
     const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: " pk_live " }), {} as never);
     const request = jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
@@ -261,6 +280,86 @@ describe("Strowallet provider", () => {
 });
 
 describe("Strowallet webhooks", () => {
+  it("updates a transfer from a nested successful callback", async () => {
+    const transactionUpdate = jest.fn().mockResolvedValue({ id: "txn_1" });
+    const prisma = {
+      transaction: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "txn_1",
+          userId: "user_1",
+          status: TransactionStatus.processing
+        }),
+        update: transactionUpdate
+      },
+      auditLog: { create: jest.fn() }
+    };
+    const logs = {
+      createReceived: jest.fn().mockResolvedValue({ id: "log_1" }),
+      isProcessed: jest.fn().mockResolvedValue(false),
+      recordProcessedKey: jest.fn().mockResolvedValue(true),
+      markProcessed: jest.fn(),
+      markFailed: jest.fn(),
+      markDuplicate: jest.fn(),
+      markIgnored: jest.fn(),
+      notifyUser: jest.fn(),
+      sanitize: jest.fn((value) => value),
+      toJson: jest.fn((value) => value)
+    };
+    const strowallet = { verifyTransferWebhook: jest.fn().mockResolvedValue(true) };
+    const service = new StrowalletWebhookService(prisma as never, {} as never, logs as never, strowallet as never);
+
+    await service.receiveBankTransfer({
+      event: "banktransfer.successful",
+      data: {
+        merchant_tx_ref: "STW-NESTED-1",
+        status: "successful",
+        amount: 1000
+      }
+    });
+
+    expect(prisma.transaction.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ type: "ngn_transfer" })
+    }));
+    expect(transactionUpdate).toHaveBeenCalledWith({
+      where: { id: "txn_1" },
+      data: {
+        status: TransactionStatus.successful,
+        providerStatus: TransactionStatus.successful,
+        completedAt: expect.any(Date)
+      }
+    });
+    expect(logs.markProcessed).toHaveBeenCalled();
+  });
+
+  it("acknowledges but does not process an unverified callback", async () => {
+    const logs = {
+      createReceived: jest.fn().mockResolvedValue({ id: "log_1" }),
+      markFailed: jest.fn()
+    };
+    const strowallet = { verifyTransferWebhook: jest.fn().mockResolvedValue(false) };
+    const service = new StrowalletWebhookService({} as never, {} as never, logs as never, strowallet as never);
+
+    await expect(service.receiveBankTransfer({ event: "dashboard.test" })).resolves.toEqual({
+      duplicate: false,
+      accepted: false
+    });
+    expect(logs.markFailed).toHaveBeenCalledWith("log_1", expect.stringContaining("could not be verified"));
+  });
+
+  it("always acknowledges the bank-transfer callback with a success body", async () => {
+    const service = { receiveBankTransfer: jest.fn().mockRejectedValue(new Error("temporary database error")) };
+    const controller = new StrowalletWebhookController(service as never);
+
+    await expect(controller.receiveBankTransfer({ event: "banktransfer.successful" })).resolves.toEqual({
+      success: true,
+      message: "Webhook received"
+    });
+    expect(controller.bankTransferHealth()).toEqual({
+      success: true,
+      message: "Strowallet bank-transfer webhook is ready"
+    });
+  });
+
   it("credits the matched DVA owner from virtual-account webhooks", async () => {
     const prisma = {
       dedicatedVirtualAccount: {

@@ -1103,6 +1103,17 @@ history and receipt responses use that sender name, report `bankName` as
 `Transfa`, and use the sender's active CashDrop image. Unmatched external bank
 credits retain the originating bank name supplied by the provider.
 
+Configure the Strowallet transfer callback as:
+
+`POST {PUBLIC_API_BASE_URL}/{API_PREFIX}/webhooks/strowallet/bank-transfer`
+
+The default path is `/api/v1/webhooks/strowallet/bank-transfer`. Both `GET` and
+`POST` return HTTP 200 so the Strowallet dashboard can validate the callback.
+POST payloads are logged before processing; unverified payloads are acknowledged
+but never applied. Transfer status and reference fields may be supplied either at
+the payload root or under `data` / `data.transfer`. A verified successful event
+updates the matched NGN transfer from `processing` to `successful`.
+
 
 # USD TRANSFER
 
