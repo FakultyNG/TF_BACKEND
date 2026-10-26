@@ -1096,6 +1096,13 @@ provider rejection text is retained in `error.details.providerReason`, and the
 public message distinguishes an invalid `STROWALLET_PUBLIC_KEY` from a valid
 account that has not been authorized for live bank transfers.
 
+For successful NGN transfers, the backend sends the authenticated customer's
+`Transfa | FirstName LastName` as Strowallet's `SenderName`. When an incoming DVA
+credit's sender name (with the Transfa prefix removed) matches an active Transfa profile, beneficiary
+history and receipt responses use that sender name, report `bankName` as
+`Transfa`, and use the sender's active CashDrop image. Unmatched external bank
+credits retain the originating bank name supplied by the provider.
+
 
 # USD TRANSFER
 

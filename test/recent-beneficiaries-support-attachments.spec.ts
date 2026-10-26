@@ -28,6 +28,11 @@ describe("recent beneficiaries and support attachments", () => {
     const auth = { verifyUserPasscode: jest.fn() };
     const recent = { saveOrUpdateNgnBeneficiary: jest.fn() };
     const ngnProvider = { submitTransfer: jest.fn().mockResolvedValue({ providerReference: "prov_1", status: TransactionStatus.processing, raw: {} }) };
+    const prisma = {
+      profile: {
+        findUnique: jest.fn().mockResolvedValue({ firstName: "Edward", lastName: "Roberts" })
+      }
+    };
     const service = new TransfersService(
       redis as never,
       wallet as never,
@@ -36,7 +41,9 @@ describe("recent beneficiaries and support attachments", () => {
       {} as never,
       recent as never,
       ngnProvider as never,
-      {} as never
+      {} as never,
+      undefined,
+      prisma as never
     );
 
     await service.confirmNgn("user_1", "quote_1", "12345");
@@ -47,6 +54,9 @@ describe("recent beneficiaries and support attachments", () => {
       totalDebit: 1100
     }));
     expect(recent.saveOrUpdateNgnBeneficiary).toHaveBeenCalledWith("user_1", quote, "txn_1");
+    expect(ngnProvider.submitTransfer).toHaveBeenCalledWith(expect.objectContaining({
+      senderName: "Transfa | Edward Roberts"
+    }));
   });
 
   it("authorizes NGN transfer with an enabled biometric device instead of passcode", async () => {

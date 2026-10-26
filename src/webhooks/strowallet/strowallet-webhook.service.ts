@@ -174,17 +174,35 @@ export class StrowalletWebhookService {
       data.senderAccountNumber,
       data.originatorAccountNumber
     );
-    const normalized = normalizedName(name);
+    const senderName = stripTransfaSenderPrefix(name);
+    const normalized = normalizedName(senderName);
     const profiles = this.prisma.profile
       ? await this.prisma.profile.findMany({
-          where: { profileImageUrl: { not: null } },
-          select: { firstName: true, lastName: true, profileImageUrl: true }
+          where: { user: { status: "active" } },
+          select: {
+            firstName: true,
+            lastName: true,
+            user: {
+              select: {
+                cashDropProfile: {
+                  select: { status: true, profileImageUrl: true }
+                }
+              }
+            }
+          }
         })
       : [];
     const matchingProfile = profiles.find((profile) =>
       normalizedName([profile.firstName, profile.lastName].filter(Boolean).join(" ")) === normalized
     );
-    return { name, memo, bankName, accountNumber, profileImageUrl: matchingProfile?.profileImageUrl };
+    const transfaSender = matchingProfile?.user.cashDropProfile?.status === "active";
+    return {
+      name: matchingProfile ? senderName : name,
+      memo,
+      bankName: matchingProfile ? "Transfa" : bankName,
+      accountNumber,
+      profileImageUrl: transfaSender ? matchingProfile.user.cashDropProfile?.profileImageUrl : undefined
+    };
   }
 
   private async handleBankTransfer(event: NormalizedWebhookEvent) {
@@ -277,4 +295,8 @@ function normalizedName(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
+}
+
+function stripTransfaSenderPrefix(value: string) {
+  return value.replace(/^transfa\s*\|\s*/i, "").trim();
 }

@@ -158,6 +158,7 @@ export class TransfersService {
     if (balance.balance < quote.totalDebit) {
       throw new ApiException("Insufficient wallet balance", "INSUFFICIENT_BALANCE", HttpStatus.BAD_REQUEST);
     }
+    const senderName = await this.getSenderName(userId);
     const reference = `txn_ngn_${uuid().replace(/-/g, "").slice(0, 12)}`;
     const debit = await this.walletService.debitWallet({
       userId,
@@ -180,7 +181,8 @@ export class TransfersService {
         bankCode: quote.bankCode,
         narration: narration || quote.narration,
         reference,
-        nameEnquiryReference: quote.nameEnquiryReference
+        nameEnquiryReference: quote.nameEnquiryReference,
+        senderName
       });
       const provider = providerResult.provider ?? "mock_lync";
       await this.updateTransactionProvider(
@@ -411,6 +413,16 @@ export class TransfersService {
 
   private exactName(value: string) {
     return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("en-NG");
+  }
+
+  private async getSenderName(userId: string) {
+    if (!this.prisma) return undefined;
+    const profile = await this.prisma.profile.findUnique({
+      where: { userId },
+      select: { firstName: true, lastName: true }
+    });
+    const name = [profile?.firstName, profile?.lastName].filter(Boolean).join(" ").trim();
+    return name ? `Transfa | ${name}` : "Transfa";
   }
 
   private stringValue(value: unknown) {

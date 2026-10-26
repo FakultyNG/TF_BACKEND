@@ -266,6 +266,18 @@ describe("Strowallet webhooks", () => {
       dedicatedVirtualAccount: {
         findFirst: jest.fn().mockResolvedValue({ userId: "user_1", accountNumber: "66212194" })
       },
+      profile: {
+        findMany: jest.fn().mockResolvedValue([{
+          firstName: "Edward",
+          lastName: "Roberts",
+          user: {
+            cashDropProfile: {
+              status: "active",
+              profileImageUrl: "https://cdn.example.com/edward.jpg"
+            }
+          }
+        }])
+      },
       auditLog: { create: jest.fn() }
     };
     const wallet = {
@@ -291,7 +303,10 @@ describe("Strowallet webhooks", () => {
       sessionId: "1100282610121058548",
       accountNumber: "66212194",
       transactionAmount: 100,
-      currency: "NGN"
+      currency: "NGN",
+      senderName: "Transfa | Edward Roberts",
+      senderBankName: "Providus Bank",
+      narration: "Lunch"
     });
 
     expect(wallet.creditWallet).toHaveBeenCalledWith(expect.objectContaining({
@@ -299,6 +314,12 @@ describe("Strowallet webhooks", () => {
       amount: 100,
       provider: "strowallet",
       providerReference: "1100282610121058548"
+    }));
+    expect(logs.toJson).toHaveBeenCalledWith(expect.objectContaining({
+      accountName: "Edward Roberts",
+      bankName: "Transfa",
+      memo: "Lunch",
+      counterpartyProfileImageUrl: "https://cdn.example.com/edward.jpg"
     }));
     expect(logs.markProcessed).toHaveBeenCalledWith("log_1", "strowallet", expect.any(Object), "Transaction", "txn_1");
   });
