@@ -134,7 +134,7 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
     const resolverCandidates = resolveBankByAccount(accountNumber);
     const candidateLimit = Math.max(
       3,
-      Number(this.config.get<string>("NGN_BANK_SUGGESTION_CANDIDATE_LIMIT", "24")) || 24
+      Number(this.config.get<string>("NGN_BANK_SUGGESTION_CANDIDATE_LIMIT", "40")) || 40
     );
     const banks = uniqueBanks(
       resolverCandidates
@@ -142,8 +142,8 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
         .filter((bank): bank is Bank => Boolean(bank))
     ).slice(0, candidateLimit);
     const suggestions: BankAccountSuggestion[] = [];
-    for (let index = 0; index < banks.length && suggestions.length < 3; index += 4) {
-      const batch = banks.slice(index, index + 4);
+    for (let index = 0; index < banks.length && suggestions.length < 5; index += 5) {
+      const batch = banks.slice(index, index + 5);
       const results = await Promise.all(batch.map(async (bank) => {
         try {
           return await this.resolveAccount(bank.code, accountNumber);
@@ -151,7 +151,7 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
           return null;
         }
       }));
-      for (let offset = 0; offset < results.length && suggestions.length < 3; offset += 1) {
+      for (let offset = 0; offset < results.length && suggestions.length < 5; offset += 1) {
         const resolved = results[offset];
         if (resolved) {
           suggestions.push({

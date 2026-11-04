@@ -56,7 +56,7 @@ export class TransfersService {
 
   async suggestBanksByAccountNumber(accountNumber: string) {
     const providerSuggestions = await this.ngnProvider.suggestBanksByAccountNumber(accountNumber);
-    const suggestions = [...providerSuggestions].sort((left, right) => right.confidence - left.confidence).slice(0, 3);
+    const suggestions = [...providerSuggestions].sort((left, right) => right.confidence - left.confidence).slice(0, 5);
     return { accountNumber, suggestions };
   }
 

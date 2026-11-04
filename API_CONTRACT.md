@@ -967,7 +967,7 @@ is absent, resolution fails before a wallet debit can be attempted.
 
 POST /transfers/ngn/suggest-banks
 
-This endpoint is used when the user enters a 10-digit NGN account number and the app wants possible bank/account matches before the user selects a bank. The backend returns up to 3 suggestions ordered by highest confidence first.
+This endpoint is used when the user enters a 10-digit NGN account number and the app wants possible bank/account matches before the user selects a bank. The backend returns up to 5 suggestions ordered by highest confidence first.
 
 ## Request
 ```json
@@ -1012,7 +1012,7 @@ This endpoint is used when the user enters a 10-digit NGN account number and the
 
 Notes:
 - Mobile should call this after the account number reaches 10 digits.
-- Suggestions are capped at 3 and sorted by `confidence` descending. Mobile should display them in the returned order.
+- Suggestions are capped at 5 and sorted by `confidence` descending. Mobile should display them in the returned order.
 - If more than one suggestion is returned, the user should select the correct bank before proceeding.
 - The backend still requires `bankCode` and `accountNumber` for `/transfers/ngn/resolve-account` and `/transfers/ngn/quote`.
 - In local mock mode, suggestions are deterministic placeholders. With Strowallet, production candidates are ranked using the CBN NUBAN checksum data from `naija-bank-account-resolver`, mapped to Strowallet's live bank codes, and then verified by live name enquiry before they are returned.

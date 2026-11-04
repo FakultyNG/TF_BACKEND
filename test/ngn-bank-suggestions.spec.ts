@@ -1,7 +1,7 @@
 import { TransfersService } from "../src/transfers/transfers.service";
 
 describe("NGN bank suggestions", () => {
-  it("delegates account-number-only bank suggestions to the NGN provider and returns top 3 by confidence", async () => {
+  it("delegates account-number-only bank suggestions to the NGN provider and returns up to 5 by confidence", async () => {
     const ngnProvider = {
       suggestBanksByAccountNumber: jest.fn().mockResolvedValue([
         {
@@ -10,6 +10,13 @@ describe("NGN bank suggestions", () => {
           bankCode: "035",
           bankName: "Wema Bank",
           confidence: 70
+        },
+        {
+          accountName: "JOHN DOE",
+          accountNumber: "0123456789",
+          bankCode: "232",
+          bankName: "Sterling Bank",
+          confidence: 65
         },
         {
           accountName: "JOHN DOE",
@@ -31,6 +38,13 @@ describe("NGN bank suggestions", () => {
           bankCode: "058",
           bankName: "GTBank",
           confidence: 88
+        },
+        {
+          accountName: "JOHN DOE",
+          accountNumber: "0123456789",
+          bankCode: "057",
+          bankName: "Zenith Bank",
+          confidence: 55
         }
       ])
     };
@@ -68,6 +82,20 @@ describe("NGN bank suggestions", () => {
           bankCode: "035",
           bankName: "Wema Bank",
           confidence: 70
+        },
+        {
+          accountName: "JOHN DOE",
+          accountNumber: "0123456789",
+          bankCode: "232",
+          bankName: "Sterling Bank",
+          confidence: 65
+        },
+        {
+          accountName: "JOHN DOE",
+          accountNumber: "0123456789",
+          bankCode: "999",
+          bankName: "OPay",
+          confidence: 60
         }
       ]
     });

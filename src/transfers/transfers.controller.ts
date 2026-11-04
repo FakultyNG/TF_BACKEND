@@ -33,7 +33,7 @@ export class TransfersController {
   @Post("ngn/suggest-banks")
   @ApiOperation({
     summary: "Suggest NGN banks by account number",
-    description: "Returns up to 3 possible NGN bank/account matches sorted by highest confidence first."
+    description: "Returns up to 5 possible NGN bank/account matches sorted by highest confidence first."
   })
   @ApiOkResponse({
     description: "Bank suggestions fetched successfully",

@@ -51,8 +51,8 @@ export class TransactionsService {
       payoutCurrency: transaction.payoutCurrency,
       status: transaction.status,
       reference: transaction.reference,
-      description: transaction.description,
-      narration: transaction.narration,
+      description: this.publicDescription(transaction),
+      narration: this.publicNarration(transaction),
       ...this.safeTransferDetails(transaction.metadata),
       createdAt: transaction.createdAt,
       completedAt: transaction.completedAt,
@@ -71,8 +71,8 @@ export class TransactionsService {
       currency: transaction.currency,
       status: transaction.status,
       reference: transaction.reference,
-      description: transaction.description,
-      narration: transaction.narration,
+      description: this.publicDescription(transaction),
+      narration: this.publicNarration(transaction),
       ...transfer,
       createdAt: transaction.createdAt
     };
@@ -115,5 +115,37 @@ export class TransactionsService {
       holdExpiresAt: typeof value.holdExpiresAt === "string" ? value.holdExpiresAt : undefined,
       requiredTier: typeof value.requiredTier === "string" ? value.requiredTier : undefined
     };
+  }
+
+  private publicDescription(transaction: { type: TransactionType; status: TransactionStatus; description: string | null }) {
+    if (transaction.type === TransactionType.reversal) return "Transaction reversal";
+    if (transaction.status !== TransactionStatus.failed && transaction.status !== TransactionStatus.reversed) {
+      return transaction.description;
+    }
+    switch (transaction.type) {
+      case TransactionType.ngn_transfer:
+        return "Bank transfer";
+      case TransactionType.usd_transfer:
+      case TransactionType.cny_transfer:
+        return "International transfer";
+      case TransactionType.gift_card:
+        return "Gift card purchase";
+      case TransactionType.bill_payment:
+        return "Bill payment";
+      case TransactionType.wallet_funding:
+        return "Wallet funding";
+      case TransactionType.wallet_adjustment:
+        return "Wallet adjustment";
+      case TransactionType.fee:
+        return "Transaction fee";
+      default:
+        return "Transaction";
+    }
+  }
+
+  private publicNarration(transaction: { type: TransactionType; narration: string | null }) {
+    // Operational reversal reasons belong in provider/audit logs, not in the
+    // customer's transaction history.
+    return transaction.type === TransactionType.reversal ? null : transaction.narration;
   }
 }

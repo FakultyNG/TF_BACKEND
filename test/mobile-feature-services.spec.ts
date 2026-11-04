@@ -65,6 +65,56 @@ describe("next mobile feature services", () => {
     expect(prisma.transaction.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ userId: "user_1" }) }));
   });
 
+  it("hides internal failure reasons from customer transaction history", async () => {
+    const prisma = {
+      $transaction: jest.fn().mockResolvedValue([
+        [
+          {
+            id: "txn_reversal",
+            type: TransactionType.reversal,
+            amount: 1000,
+            fee: 0,
+            totalDebit: 1000,
+            currency: "NGN",
+            status: TransactionStatus.successful,
+            reference: "rev_1",
+            description: "Provider failed before NGN transfer submission",
+            narration: "Reversal of txn_ngn_private_reference",
+            metadata: { reason: "Request failed with status code 403" },
+            createdAt: new Date()
+          },
+          {
+            id: "txn_failed",
+            type: TransactionType.ngn_transfer,
+            amount: 1000,
+            fee: 10,
+            totalDebit: 1010,
+            currency: "NGN",
+            status: TransactionStatus.failed,
+            reference: "txn_1",
+            description: "Strowallet request failed with status code 403",
+            narration: "Lunch",
+            metadata: {},
+            createdAt: new Date()
+          }
+        ],
+        2
+      ]),
+      transaction: { findMany: jest.fn(), count: jest.fn() }
+    };
+    const service = new TransactionsService(prisma as never);
+
+    const result = await service.listUserTransactions("user_1", { page: 1, limit: 20 });
+
+    expect(result.items[0]).toMatchObject({
+      description: "Transaction reversal",
+      narration: null
+    });
+    expect(result.items[1]).toMatchObject({ description: "Bank transfer", narration: "Lunch" });
+    expect(JSON.stringify(result.items)).not.toContain("Provider failed");
+    expect(JSON.stringify(result.items)).not.toContain("status code 403");
+  });
+
   it("rejects fetching another user's transaction", async () => {
     const service = new TransactionsService({
       transaction: { findFirst: jest.fn().mockResolvedValue(null) }
