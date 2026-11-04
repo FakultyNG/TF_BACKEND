@@ -146,6 +146,19 @@ Swagger docs:
 http://localhost:4000/api/v1/docs
 ```
 
+### Stable outbound IP for Strowallet
+
+Strowallet applies its IP policy to the backend server that calls its API, not
+to the mobile app. On hosts with rotating outbound addresses, route Strowallet
+requests through a fixed-egress HTTPS proxy and allowlist that proxy IP once:
+
+```env
+STROWALLET_HTTPS_PROXY_URL=http://username:password@proxy.example.com:8080
+```
+
+Leave the variable empty when the deployment already has a static outbound IP.
+Provider IP enforcement cannot be disabled by application code.
+
 Swagger exposure is controlled by environment variables:
 
 ```env

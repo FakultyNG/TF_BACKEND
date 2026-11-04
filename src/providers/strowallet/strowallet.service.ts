@@ -1,6 +1,8 @@
 import { HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import axios, { AxiosError, AxiosInstance } from "axios";
+import { HttpsProxyAgent } from "https-proxy-agent";
+import { resolveBankByAccount } from "naija-bank-account-resolver";
 import { ApiException } from "../../common/errors/api.exception";
 import { sha256 } from "../../common/utils/hash.util";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -20,15 +22,19 @@ type StrowalletBvnIdentity = {
 export class StrowalletService implements DvaProviderService, NgnTransferProviderService, KycProvider {
   private readonly logger = new Logger(StrowalletService.name);
   private readonly http: AxiosInstance;
+  private bankCache?: { expiresAt: number; banks: Bank[] };
 
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService
   ) {
+    const proxyUrl = this.config.get<string>("STROWALLET_HTTPS_PROXY_URL")?.trim();
+    const proxyAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
     this.http = axios.create({
       baseURL: this.config.get<string>("STROWALLET_BASE_URL", "https://strowallet.com"),
       timeout: Number(this.config.get<string>("STROWALLET_TIMEOUT_MS", "15000")),
-      headers: { accept: "application/json", "Content-Type": "application/json" }
+      headers: { accept: "application/json", "Content-Type": "application/json" },
+      ...(proxyAgent ? { httpAgent: proxyAgent, httpsAgent: proxyAgent, proxy: false } : {})
     });
   }
 
@@ -90,6 +96,7 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
   }
 
   async getBanks(): Promise<Bank[]> {
+    if (this.bankCache && this.bankCache.expiresAt > Date.now()) return this.bankCache.banks;
     const raw = await this.get(this.config.get<string>("STROWALLET_BANK_LIST_PATH", "/api/banks/lists/"));
     const top = objectOrEmpty(raw);
     const body = unwrap(raw);
@@ -118,19 +125,41 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
         HttpStatus.BAD_GATEWAY
       );
     }
+    this.bankCache = { banks, expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
     return banks;
   }
 
   async suggestBanksByAccountNumber(accountNumber: string): Promise<BankAccountSuggestion[]> {
-    const banks = await this.getBanks();
+    const providerBanks = await this.getBanks();
+    const resolverCandidates = resolveBankByAccount(accountNumber);
+    const candidateLimit = Math.max(
+      3,
+      Number(this.config.get<string>("NGN_BANK_SUGGESTION_CANDIDATE_LIMIT", "24")) || 24
+    );
+    const banks = uniqueBanks(
+      resolverCandidates
+        .map((candidate) => matchProviderBank(providerBanks, candidate.code, candidate.name))
+        .filter((bank): bank is Bank => Boolean(bank))
+    ).slice(0, candidateLimit);
     const suggestions: BankAccountSuggestion[] = [];
-    for (const bank of banks.slice(0, 12)) {
-      try {
-        const resolved = await this.resolveAccount(bank.code, accountNumber);
-        suggestions.push({ ...resolved, confidence: suggestions.length === 0 ? 95 : 80 });
-        if (suggestions.length >= 3) break;
-      } catch {
-        // Continue probing likely banks; Strowallet does not expose a dedicated suggestion endpoint.
+    for (let index = 0; index < banks.length && suggestions.length < 3; index += 4) {
+      const batch = banks.slice(index, index + 4);
+      const results = await Promise.all(batch.map(async (bank) => {
+        try {
+          return await this.resolveAccount(bank.code, accountNumber);
+        } catch {
+          return null;
+        }
+      }));
+      for (let offset = 0; offset < results.length && suggestions.length < 3; offset += 1) {
+        const resolved = results[offset];
+        if (resolved) {
+          suggestions.push({
+            ...resolved,
+            bankName: resolved.bankName || batch[offset].name,
+            confidence: Math.max(70, 100 - (index + offset) * 2)
+          });
+        }
       }
     }
     return suggestions;
@@ -169,9 +198,19 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
       accountName,
       accountNumber,
       bankCode,
-      bankName: firstString(body.bankName, body.bank_name, body.bank) || bankCode,
+      bankName: firstString(body.bankName, body.bank_name, body.bank) || await this.bankNameForCode(bankCode),
       providerReference
     };
+  }
+
+  private async bankNameForCode(bankCode: string) {
+    try {
+      const bank = (await this.getBanks()).find((candidate) => sameBankCode(candidate.code, bankCode));
+      if (bank?.name) return bank.name;
+    } catch {
+      // Account resolution remains useful if the provider's bank-list endpoint is temporarily unavailable.
+    }
+    return "Selected bank";
   }
 
   async submitTransfer(input: {
@@ -568,6 +607,9 @@ function responseProviderMessage(value: unknown): string {
 
 function publicTransferError(message: string) {
   const normalized = message.toLowerCase();
+  if (normalized.includes("whitelist") || normalized.includes("allowlist") || normalized.includes("ip address") || normalized.includes("invalid ip")) {
+    return "Strowallet rejected this server's outbound IP; configure STROWALLET_HTTPS_PROXY_URL with a fixed-egress proxy and allowlist that IP once";
+  }
   if (normalized.includes("balance") || normalized.includes("insufficient fund")) {
     return "Strowallet payout balance is insufficient; fund the live Strowallet account and try again";
   }
@@ -605,6 +647,40 @@ function safeProviderReason(message: string) {
 
 function samePath(left: string, right: string) {
   return left.replace(/\/+$/g, "") === right.replace(/\/+$/g, "");
+}
+
+function matchProviderBank(banks: Bank[], resolverCode: string, resolverName: string) {
+  return banks.find((bank) => sameBankCode(bank.code, resolverCode)) ??
+    banks.find((bank) => sameBankName(bank.name, resolverName));
+}
+
+function uniqueBanks(banks: Bank[]) {
+  const seen = new Set<string>();
+  return banks.filter((bank) => {
+    const key = bank.code.trim();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function sameBankCode(left: string, right: string) {
+  const normalize = (value: string) => value.trim().replace(/^0+/, "") || "0";
+  return normalize(left) === normalize(right);
+}
+
+function sameBankName(left: string, right: string) {
+  const normalize = (value: string) => {
+    const compact = value.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (compact.includes("guarantytrust") || compact.includes("gtbank")) return "gtbank";
+    if (compact.includes("firstbank")) return "firstbank";
+    if (compact.includes("unitedbankforafrica") || compact === "uba") return "uba";
+    if (compact.includes("firstcitymonument") || compact === "fcmb") return "fcmb";
+    return compact.replace(/(nigeria|plc|limited|ltd|microfinance|bank)/g, "").replace(/mfb$/g, "");
+  };
+  const a = normalize(left);
+  const b = normalize(right);
+  return Boolean(a && b && (a === b || (a.length >= 5 && b.length >= 5 && (a.includes(b) || b.includes(a)))));
 }
 
 function publicDvaError(message: string) {

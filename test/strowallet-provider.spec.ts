@@ -149,6 +149,65 @@ describe("Strowallet provider", () => {
     });
   });
 
+  it("uses the provider bank name instead of exposing a numeric bank code", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_test" }), {} as never);
+    const request = jest.spyOn((service as never) as { request: jest.Mock }, "request")
+      .mockResolvedValueOnce({
+        data: {
+          account_name: "ADA LOVELACE",
+          name_enquiry_reference: "name_ref_3"
+        }
+      })
+      .mockResolvedValueOnce({
+        data: { bank_list: [{ bank_code: "000005", bank_name: "Access Bank" }] }
+      });
+
+    await expect(service.resolveAccount("000005", "0123456789")).resolves.toMatchObject({
+      accountName: "ADA LOVELACE",
+      bankCode: "000005",
+      bankName: "Access Bank"
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("ranks NUBAN candidates before probing Strowallet account names", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_test" }), {} as never);
+    jest.spyOn(service, "getBanks").mockResolvedValue([
+      { code: "999999", name: "Unrelated Microfinance Bank" },
+      { code: "000005", name: "Access Bank" },
+      { code: "000016", name: "First Bank of Nigeria" },
+      { code: "000004", name: "United Bank for Africa" }
+    ]);
+    const resolve = jest.spyOn(service, "resolveAccount").mockImplementation(async (bankCode, accountNumber) => ({
+      accountName: "TEST RECIPIENT",
+      accountNumber,
+      bankCode,
+      bankName: bankCode === "000005" ? "Access Bank" : bankCode === "000016" ? "First Bank" : "UBA",
+      providerReference: `ref_${bankCode}`
+    }));
+
+    const result = await service.suggestBanksByAccountNumber("0000014579");
+
+    expect(resolve).not.toHaveBeenCalledWith("999999", expect.any(String));
+    expect(resolve.mock.calls.map(([bankCode]) => bankCode)).toEqual(["000005", "000016", "000004"]);
+    expect(result).toEqual([
+      expect.objectContaining({ bankCode: "000005", bankName: "Access Bank", confidence: 100 }),
+      expect.objectContaining({ bankCode: "000016", bankName: "First Bank", confidence: 98 }),
+      expect.objectContaining({ bankCode: "000004", bankName: "UBA", confidence: 96 })
+    ]);
+  });
+
+  it("routes provider traffic through an optional stable-egress proxy", () => {
+    const service = new StrowalletService(config({
+      STROWALLET_PUBLIC_KEY: "pk_test",
+      STROWALLET_HTTPS_PROXY_URL: "http://proxy.example.com:8080"
+    }), {} as never);
+    const http = (service as unknown as { http: { defaults: Record<string, unknown> } }).http;
+
+    expect(http.defaults.proxy).toBe(false);
+    expect(http.defaults.httpsAgent).toBeDefined();
+  });
+
   it("does not submit a transfer without Strowallet's required name-enquiry reference", async () => {
     const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_test" }), {} as never);
     const request = jest.spyOn((service as never) as { request: jest.Mock }, "request");
@@ -207,6 +266,35 @@ describe("Strowallet provider", () => {
     })).rejects.toMatchObject({
       code: "STROWALLET_TRANSFER_REQUEST_FAILED",
       message: "Strowallet has not authorized live bank transfers for this account: Bank transfer permission is not allowed for this API key"
+    });
+  });
+
+  it("explains how to stabilize egress when Strowallet rejects a rotating IP", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_live_secret" }), {} as never);
+    const http = (service as unknown as { http: { request: jest.Mock } }).http;
+    jest.spyOn(http, "request").mockRejectedValue(new AxiosError(
+      "Request failed with status code 403",
+      "ERR_BAD_REQUEST",
+      undefined,
+      undefined,
+      {
+        status: 403,
+        statusText: "Forbidden",
+        headers: {},
+        config: {} as never,
+        data: { message: "IP address is not whitelisted" }
+      }
+    ));
+
+    await expect(service.submitTransfer({
+      amount: 1000,
+      accountNumber: "0123456789",
+      bankCode: "044",
+      reference: "txn_1",
+      nameEnquiryReference: "name_ref_1"
+    })).rejects.toMatchObject({
+      code: "STROWALLET_TRANSFER_REQUEST_FAILED",
+      message: expect.stringContaining("STROWALLET_HTTPS_PROXY_URL")
     });
   });
 

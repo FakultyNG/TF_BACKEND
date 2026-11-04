@@ -1015,7 +1015,7 @@ Notes:
 - Suggestions are capped at 3 and sorted by `confidence` descending. Mobile should display them in the returned order.
 - If more than one suggestion is returned, the user should select the correct bank before proceeding.
 - The backend still requires `bankCode` and `accountNumber` for `/transfers/ngn/resolve-account` and `/transfers/ngn/quote`.
-- In local mock mode, suggestions are deterministic placeholders. Production behavior depends on the NGN provider's account lookup/name-enquiry support.
+- In local mock mode, suggestions are deterministic placeholders. With Strowallet, production candidates are ranked using the CBN NUBAN checksum data from `naija-bank-account-resolver`, mapped to Strowallet's live bank codes, and then verified by live name enquiry before they are returned.
 
 4. NGN Transfer Quote
 

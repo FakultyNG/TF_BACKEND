@@ -59,12 +59,18 @@ importers:
       helmet:
         specifier: ^7.2.0
         version: 7.2.0
+      https-proxy-agent:
+        specifier: 7.0.6
+        version: 7.0.6(supports-color@8.1.1)
       ioredis:
         specifier: ^5.4.2
         version: 5.11.1(supports-color@8.1.1)
       multer:
         specifier: ^2.1.1
         version: 2.4.0
+      naija-bank-account-resolver:
+        specifier: 1.0.2
+        version: 1.0.2
       passport:
         specifier: ^0.7.0
         version: 0.7.0
@@ -2555,6 +2561,9 @@ packages:
   mute-stream@1.0.0:
     resolution: {integrity: sha512-avsJQhyd+680gKXyG/sQc0nXaC6rBkPOfyHYcFb9+hdkqQkR9bdnkJ0AMZhke0oesPqIO+mFFJ+IdBc7mst4IA==}
     engines: {node: ^14.17.0 || ^16.13.0 || >=18.0.0}
+
+  naija-bank-account-resolver@1.0.2:
+    resolution: {integrity: sha512-6biNTOlJTNj0ZVB5Tky6N1QUB/EZt6NqW6SKFTZMYy81ndvVIQ0dV8d0SH8lawDdNQMqjeT8LvlQ41nkop3Zsg==}
 
   natural-compare@1.4.0:
     resolution: {integrity: sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==}
@@ -6419,6 +6428,8 @@ snapshots:
   mute-stream@0.0.8: {}
 
   mute-stream@1.0.0: {}
+
+  naija-bank-account-resolver@1.0.2: {}
 
   natural-compare@1.4.0: {}
 
