@@ -2,13 +2,13 @@ import { HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import axios, { AxiosError, AxiosInstance } from "axios";
 import { HttpsProxyAgent } from "https-proxy-agent";
-import { resolveBankByAccount } from "naija-bank-account-resolver";
 import { ApiException } from "../../common/errors/api.exception";
 import { sha256 } from "../../common/utils/hash.util";
 import { PrismaService } from "../../prisma/prisma.service";
 import { CreateDvaInput, CreateDvaResult, DvaProviderService, VerifyFundingResult } from "../dva/dva-provider.interface";
 import { BvnVerificationResult, KycProvider, KycVerificationContext, SelfieValidationResult } from "../interfaces/kyc-provider.interface";
 import { Bank, BankAccountSuggestion, NgnTransferProviderService, NgnTransferResult, ResolvedAccount } from "../transfers/ngn-transfer-provider.interface";
+import { getPossibleNubanBanks } from "./nuban-predictor";
 
 type JsonObject = Record<string, unknown>;
 type StrowalletBvnIdentity = {
@@ -131,38 +131,18 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
 
   async suggestBanksByAccountNumber(accountNumber: string): Promise<BankAccountSuggestion[]> {
     const providerBanks = await this.getBanks();
-    const resolverCandidates = resolveBankByAccount(accountNumber);
-    const candidateLimit = Math.max(
-      3,
-      Number(this.config.get<string>("NGN_BANK_SUGGESTION_CANDIDATE_LIMIT", "40")) || 40
-    );
     const banks = uniqueBanks(
-      resolverCandidates
+      getPossibleNubanBanks(accountNumber)
         .map((candidate) => matchProviderBank(providerBanks, candidate.code, candidate.name))
         .filter((bank): bank is Bank => Boolean(bank))
-    ).slice(0, candidateLimit);
-    const suggestions: BankAccountSuggestion[] = [];
-    for (let index = 0; index < banks.length && suggestions.length < 5; index += 5) {
-      const batch = banks.slice(index, index + 5);
-      const results = await Promise.all(batch.map(async (bank) => {
-        try {
-          return await this.resolveAccount(bank.code, accountNumber);
-        } catch {
-          return null;
-        }
-      }));
-      for (let offset = 0; offset < results.length && suggestions.length < 5; offset += 1) {
-        const resolved = results[offset];
-        if (resolved) {
-          suggestions.push({
-            ...resolved,
-            bankName: resolved.bankName || batch[offset].name,
-            confidence: Math.max(70, 100 - (index + offset) * 2)
-          });
-        }
-      }
-    }
-    return suggestions;
+    ).sort((left, right) => bankSuggestionRank(left.name) - bankSuggestionRank(right.name));
+    return banks.slice(0, 5).map((bank, index) => ({
+      accountName: "",
+      accountNumber,
+      bankCode: bank.code,
+      bankName: bank.name,
+      confidence: Math.max(80, 100 - index * 4)
+    }));
   }
 
   async resolveAccount(bankCode: string, accountNumber: string): Promise<ResolvedAccount> {
@@ -361,6 +341,21 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
       merchantTxRef
     });
     return truthySuccess(raw);
+  }
+
+  async getTransferStatus(providerReference: string) {
+    const raw = await this.get(
+      this.config.get<string>("STROWALLET_VERIFY_TRANSFER_WEBHOOK_PATH", "/api/VerifyWebHookTranfer"),
+      { merchantTxRef: providerReference }
+    );
+    const body = unwrap(raw);
+    return normalizeTransferStatus(firstString(
+      body.transferStatus,
+      body.transfer_status,
+      body.transactionStatus,
+      body.transaction_status,
+      body.status
+    )) ?? "processing";
   }
 
   private async get(path: string, query?: Record<string, string | number | undefined>) {
@@ -681,6 +676,22 @@ function sameBankName(left: string, right: string) {
   const a = normalize(left);
   const b = normalize(right);
   return Boolean(a && b && (a === b || (a.length >= 5 && b.length >= 5 && (a.includes(b) || b.includes(a)))));
+}
+
+function bankSuggestionRank(name: string) {
+  const popular = [
+    "access", "gtbank", "zenith", "uba", "firstbank", "opay", "moniepoint",
+    "kuda", "palmpay", "fidelity", "stanbicibtc", "fcmb", "sterling", "wema",
+    "union", "ecobank", "polaris", "providus"
+  ];
+  const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, "")
+    .replace("guarantytrustbank", "gtbank")
+    .replace("unitedbankforafrica", "uba")
+    .replace("firstcitymonumentbank", "fcmb")
+    .replace("stanbicibtcbank", "stanbicibtc")
+    .replace(/(nigeria|plc|limited|ltd|microfinancebank|microfinance|mfb|bank)$/g, "");
+  const index = popular.indexOf(normalized);
+  return index < 0 ? popular.length : index;
 }
 
 function publicDvaError(message: string) {

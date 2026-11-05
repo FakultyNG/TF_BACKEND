@@ -1015,7 +1015,7 @@ Notes:
 - Suggestions are capped at 5 and sorted by `confidence` descending. Mobile should display them in the returned order.
 - If more than one suggestion is returned, the user should select the correct bank before proceeding.
 - The backend still requires `bankCode` and `accountNumber` for `/transfers/ngn/resolve-account` and `/transfers/ngn/quote`.
-- In local mock mode, suggestions are deterministic placeholders. With Strowallet, production candidates are ranked using the CBN NUBAN checksum data from `naija-bank-account-resolver`, mapped to Strowallet's live bank codes, and then verified by live name enquiry before they are returned.
+- In local mock mode, suggestions are deterministic placeholders. With Strowallet, production candidates are computed locally using the CBN NUBAN checksum algorithm from `03balogun/nuban-bank-prediction-algorithm` and the bundled comprehensive Nigerian-bank directory. Candidates are mapped to Strowallet's live bank codes and returned without repeated name-enquiry calls, so the list is near-instant. The selected bank/account is still verified by Strowallet before a quote or payment can proceed.
 
 4. NGN Transfer Quote
 
@@ -1115,6 +1115,13 @@ POST payloads are logged before processing; unverified payloads are acknowledged
 but never applied. Transfer status and reference fields may be supplied either at
 the payload root or under `data` / `data.transfer`. A verified successful event
 updates the matched NGN transfer from `processing` to `successful`.
+
+The mobile receipt also polls `GET /transactions/:id` every three seconds while
+the transfer is processing. That endpoint asks Strowallet's configured
+`STROWALLET_VERIFY_TRANSFER_WEBHOOK_PATH` for the latest provider status, so a
+successful transfer is reconciled even when callback delivery is delayed or
+temporarily unreachable. The response then returns `status: successful`, which
+the app maps to its transfer-success popup and completed receipt.
 
 
 # USD TRANSFER

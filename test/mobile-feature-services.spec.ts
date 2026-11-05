@@ -123,6 +123,48 @@ describe("next mobile feature services", () => {
     await expect(service.getUserTransaction("user_1", "txn_other")).rejects.toMatchObject({ code: "TRANSACTION_NOT_FOUND" });
   });
 
+  it("reconciles a processing NGN transfer while the receipt is polling", async () => {
+    const transaction = {
+      id: "txn_processing",
+      userId: "user_1",
+      type: TransactionType.ngn_transfer,
+      amount: 1000,
+      fee: 10,
+      totalDebit: 1010,
+      currency: "NGN",
+      payoutAmount: null,
+      payoutCurrency: null,
+      status: TransactionStatus.processing,
+      reference: "txn_ref_1",
+      providerReference: "STW-1",
+      description: "NGN transfer",
+      narration: "Lunch",
+      metadata: {},
+      createdAt: new Date(),
+      completedAt: null,
+      giftCardPurchase: null,
+      supportTickets: []
+    };
+    const update = jest.fn().mockResolvedValue({
+      ...transaction,
+      status: TransactionStatus.successful,
+      completedAt: new Date()
+    });
+    const prisma = {
+      transaction: { findFirst: jest.fn().mockResolvedValue(transaction), update }
+    };
+    const provider = { getTransferStatus: jest.fn().mockResolvedValue("successful") };
+    const service = new TransactionsService(prisma as never, provider as never);
+
+    const result = await service.getUserTransaction("user_1", transaction.id);
+
+    expect(provider.getTransferStatus).toHaveBeenCalledWith("STW-1");
+    expect(result.status).toBe(TransactionStatus.successful);
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: TransactionStatus.successful })
+    }));
+  });
+
   it("issues biometric login tokens only for an enabled trusted device", async () => {
     const prisma = {
       trustedDevice: {

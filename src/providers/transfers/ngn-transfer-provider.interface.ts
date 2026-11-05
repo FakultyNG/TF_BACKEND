@@ -35,4 +35,5 @@ export interface NgnTransferProviderService {
     nameEnquiryReference?: string;
     senderName?: string;
   }): Promise<NgnTransferResult>;
+  getTransferStatus?(providerReference: string): Promise<NgnTransferResult["status"]>;
 }

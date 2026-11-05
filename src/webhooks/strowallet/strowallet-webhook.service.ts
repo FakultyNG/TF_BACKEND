@@ -48,6 +48,14 @@ export class StrowalletWebhookService {
       await this.logs.markFailed(log.id, verificationError);
       return { duplicate: false, accepted: false };
     }
+    if (!event.status && event.providerReference) {
+      try {
+        event.status = await this.strowallet.getTransferStatus(event.providerReference);
+      } catch {
+        // The verified callback can still be logged and retried if the status
+        // lookup is temporarily unavailable.
+      }
+    }
     return this.process(log.id, event, payload, "bank-transfer");
   }
 
@@ -285,9 +293,13 @@ export class StrowalletWebhookService {
       body.status,
       body.transferStatus,
       body.transfer_status,
+      body.transactionStatus,
+      body.transaction_status,
       data.status,
       data.transferStatus,
       data.transfer_status,
+      data.transactionStatus,
+      data.transaction_status,
       transfer.status
     );
     return {
@@ -299,14 +311,24 @@ export class StrowalletWebhookService {
         body.sessionID,
         body.providerReference,
         body.provider_reference,
+        body.reference,
+        body.txRef,
+        body.transactionRef,
+        body.transaction_ref,
         data.merchantTxRef,
         data.merchant_tx_ref,
         data.sessionId,
         data.sessionID,
         data.providerReference,
         data.provider_reference,
+        data.reference,
+        data.txRef,
+        data.transactionRef,
+        data.transaction_ref,
         transfer.merchantTxRef,
-        transfer.merchant_tx_ref
+        transfer.merchant_tx_ref,
+        transfer.reference,
+        transfer.txRef
       ),
       internalReference: firstString(
         body.internalReference,

@@ -170,7 +170,7 @@ describe("Strowallet provider", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
-  it("ranks NUBAN candidates before probing Strowallet account names", async () => {
+  it("uses the local NUBAN algorithm without probing Strowallet account names", async () => {
     const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_test" }), {} as never);
     jest.spyOn(service, "getBanks").mockResolvedValue([
       { code: "999999", name: "Unrelated Microfinance Bank" },
@@ -178,23 +178,31 @@ describe("Strowallet provider", () => {
       { code: "000016", name: "First Bank of Nigeria" },
       { code: "000004", name: "United Bank for Africa" }
     ]);
-    const resolve = jest.spyOn(service, "resolveAccount").mockImplementation(async (bankCode, accountNumber) => ({
-      accountName: "TEST RECIPIENT",
-      accountNumber,
-      bankCode,
-      bankName: bankCode === "000005" ? "Access Bank" : bankCode === "000016" ? "First Bank" : "UBA",
-      providerReference: `ref_${bankCode}`
-    }));
+    const resolve = jest.spyOn(service, "resolveAccount");
 
-    const result = await service.suggestBanksByAccountNumber("0000014579");
+    const result = await service.suggestBanksByAccountNumber("0010246780");
 
-    expect(resolve).not.toHaveBeenCalledWith("999999", expect.any(String));
-    expect(resolve.mock.calls.map(([bankCode]) => bankCode)).toEqual(["000005", "000016", "000004"]);
-    expect(result).toEqual([
-      expect.objectContaining({ bankCode: "000005", bankName: "Access Bank", confidence: 100 }),
-      expect.objectContaining({ bankCode: "000016", bankName: "First Bank", confidence: 98 }),
-      expect.objectContaining({ bankCode: "000004", bankName: "UBA", confidence: 96 })
-    ]);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.arrayContaining([
+      expect.objectContaining({ bankCode: "000005", bankName: "Access Bank", accountName: "" }),
+      expect.objectContaining({ bankCode: "000016", bankName: "First Bank of Nigeria", accountName: "" })
+    ]));
+    expect(result).toHaveLength(3);
+  });
+
+  it("reads a successful transfer status from the webhook verification endpoint", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_live" }), {} as never);
+    const request = jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+      data: { transfer_status: "completed" }
+    });
+
+    await expect(service.getTransferStatus("STW-STATUS-1")).resolves.toBe("successful");
+    expect(request).toHaveBeenCalledWith(
+      "get",
+      "/api/VerifyWebHookTranfer",
+      undefined,
+      { public_key: "pk_live", merchantTxRef: "STW-STATUS-1" }
+    );
   });
 
   it("routes provider traffic through an optional stable-egress proxy", () => {
@@ -434,6 +442,43 @@ describe("Strowallet webhooks", () => {
       }
     });
     expect(logs.markProcessed).toHaveBeenCalled();
+  });
+
+  it("looks up status when a verified callback omits it", async () => {
+    const transactionUpdate = jest.fn().mockResolvedValue({ id: "txn_1" });
+    const prisma = {
+      transaction: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "txn_1",
+          userId: "user_1",
+          status: TransactionStatus.processing
+        }),
+        update: transactionUpdate
+      },
+      auditLog: { create: jest.fn() }
+    };
+    const logs = {
+      createReceived: jest.fn().mockResolvedValue({ id: "log_1" }),
+      isProcessed: jest.fn().mockResolvedValue(false),
+      recordProcessedKey: jest.fn().mockResolvedValue(true),
+      markProcessed: jest.fn(),
+      markFailed: jest.fn(),
+      markDuplicate: jest.fn(),
+      markIgnored: jest.fn(),
+      notifyUser: jest.fn()
+    };
+    const strowallet = {
+      verifyTransferWebhook: jest.fn().mockResolvedValue(true),
+      getTransferStatus: jest.fn().mockResolvedValue("successful")
+    };
+    const service = new StrowalletWebhookService(prisma as never, {} as never, logs as never, strowallet as never);
+
+    await service.receiveBankTransfer({ merchantTxRef: "STW-NO-STATUS-1" });
+
+    expect(strowallet.getTransferStatus).toHaveBeenCalledWith("STW-NO-STATUS-1");
+    expect(transactionUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: TransactionStatus.successful })
+    }));
   });
 
   it("acknowledges but does not process an unverified callback", async () => {

@@ -1,13 +1,20 @@
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { HttpStatus, Inject, Injectable, Optional } from "@nestjs/common";
 import { TransactionStatus, TransactionType } from "@prisma/client";
 import { offset, pagination } from "../common/dto/pagination-query.dto";
 import { ApiException } from "../common/errors/api.exception";
 import { PrismaService } from "../prisma/prisma.service";
+import { NGN_TRANSFER_PROVIDER } from "../providers/provider.tokens";
+import { NgnTransferProviderService } from "../providers/transfers/ngn-transfer-provider.interface";
+import { WalletService } from "../wallet/wallet.service";
 import { TransactionQueryDto } from "./dto/transaction-query.dto";
 
 @Injectable()
 export class TransactionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() @Inject(NGN_TRANSFER_PROVIDER) private readonly ngnProvider?: NgnTransferProviderService,
+    @Optional() private readonly walletService?: WalletService
+  ) {}
 
   async listUserTransactions(userId: string, query: TransactionQueryDto) {
     const page = query.page ?? 1;
@@ -35,11 +42,12 @@ export class TransactionsService {
   }
 
   async getUserTransaction(userId: string, id: string) {
-    const transaction = await this.prisma.transaction.findFirst({
+    let transaction = await this.prisma.transaction.findFirst({
       where: { id, userId },
       include: { giftCardPurchase: true, supportTickets: { select: { id: true, status: true, subject: true } } }
     });
     if (!transaction) throw new ApiException("Transaction not found", "TRANSACTION_NOT_FOUND", HttpStatus.NOT_FOUND);
+    transaction = await this.reconcileNgnTransfer(transaction);
     return {
       id: transaction.id,
       type: transaction.type,
@@ -147,5 +155,47 @@ export class TransactionsService {
     // Operational reversal reasons belong in provider/audit logs, not in the
     // customer's transaction history.
     return transaction.type === TransactionType.reversal ? null : transaction.narration;
+  }
+
+  private async reconcileNgnTransfer<T extends {
+    id: string;
+    type: TransactionType;
+    status: TransactionStatus;
+    providerReference: string | null;
+  }>(transaction: T): Promise<T> {
+    if (
+      transaction.type !== TransactionType.ngn_transfer ||
+      transaction.status !== TransactionStatus.processing ||
+      !transaction.providerReference ||
+      !this.ngnProvider?.getTransferStatus
+    ) {
+      return transaction;
+    }
+    try {
+      const status = await this.ngnProvider.getTransferStatus(transaction.providerReference);
+      if (status === "successful") {
+        const updated = await this.prisma.transaction.update({
+          where: { id: transaction.id },
+          data: {
+            status: TransactionStatus.successful,
+            providerStatus: TransactionStatus.successful,
+            completedAt: new Date()
+          }
+        });
+        return { ...transaction, ...updated };
+      }
+      if (status === "failed" && this.walletService) {
+        await this.walletService.reverseTransaction(
+          undefined,
+          transaction.id,
+          "NGN transfer reversed after provider status reconciliation"
+        );
+        return { ...transaction, status: TransactionStatus.reversed };
+      }
+    } catch {
+      // Webhooks remain the primary source. A provider polling outage must not
+      // prevent the customer from opening an existing transaction receipt.
+    }
+    return transaction;
   }
 }
