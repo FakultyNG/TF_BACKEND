@@ -221,7 +221,8 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
     });
     const body = unwrap(raw);
     const responseMessage = responseProviderMessage(raw);
-    if (transferResponseRejected(raw)) {
+    const providerConfirmedSuccess = transferResponseSuccessful(raw);
+    if (!providerConfirmedSuccess && transferResponseRejected(raw)) {
       throw new ApiException(
         publicTransferError(responseMessage),
         "STROWALLET_TRANSFER_REJECTED",
@@ -230,7 +231,9 @@ export class StrowalletService implements DvaProviderService, NgnTransferProvide
       );
     }
     return {
-      status: normalizeTransferStatus(firstString(body.status, body.transferStatus)) ?? "processing",
+      status: providerConfirmedSuccess
+        ? "successful"
+        : normalizeTransferStatus(firstString(body.status, body.transferStatus)) ?? "processing",
       provider: "strowallet",
       providerReference: firstString(body.merchantTxRef, body.merchant_tx_ref, body.sessionId, body.sessionID, body.reference, body.txRef) || input.reference,
       raw: sanitize(raw)
@@ -536,6 +539,15 @@ function truthySuccess(value: unknown) {
 function failureStatus(value?: string) {
   if (!value) return false;
   return ["fail", "invalid", "error", "declined"].some((item) => value.toLowerCase().includes(item));
+}
+
+function transferResponseSuccessful(value: unknown) {
+  if (value === true || value === "true") return true;
+  const root = objectOrEmpty(value);
+  const body = unwrap(value);
+  return [root.success, body.success].some(
+    (success) => success === true || (typeof success === "string" && success.toLowerCase().trim() === "true")
+  );
 }
 
 function transferResponseRejected(value: unknown) {

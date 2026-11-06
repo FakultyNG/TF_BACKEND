@@ -1116,6 +1116,13 @@ but never applied. Transfer status and reference fields may be supplied either a
 the payload root or under `data` / `data.transfer`. A verified successful event
 updates the matched NGN transfer from `processing` to `successful`.
 
+The bank-transfer submission response is the primary completion signal. When
+Strowallet returns an explicit `success: true` (or the string `"true"`) at the
+response root or inside `data`, the backend immediately records the transaction
+as `successful` and returns that status to the app. The callback and status
+polling paths remain reconciliation fallbacks for submissions without an
+explicit success signal.
+
 The mobile receipt also polls `GET /transactions/:id` every three seconds while
 the transfer is processing. That endpoint asks Strowallet's configured
 `STROWALLET_VERIFY_TRANSFER_WEBHOOK_PATH` for the latest provider status, so a

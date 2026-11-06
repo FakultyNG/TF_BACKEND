@@ -133,6 +133,48 @@ describe("Strowallet provider", () => {
     });
   });
 
+  it("prioritizes Strowallet's explicit success response over secondary transfer status", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_test" }), {} as never);
+    jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+      success: true,
+      merchantTxRef: "STW_TRUE_1",
+      status: "processing"
+    });
+
+    await expect(service.submitTransfer({
+      amount: 1000,
+      accountNumber: "0123456789",
+      bankCode: "044",
+      reference: "txn_true_1",
+      nameEnquiryReference: "name_ref_true_1"
+    })).resolves.toMatchObject({
+      provider: "strowallet",
+      providerReference: "STW_TRUE_1",
+      status: "successful"
+    });
+  });
+
+  it("accepts a nested string success response as immediate transfer confirmation", async () => {
+    const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_test" }), {} as never);
+    jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
+      data: {
+        success: "true",
+        merchant_tx_ref: "STW_TRUE_2"
+      }
+    });
+
+    await expect(service.submitTransfer({
+      amount: 1000,
+      accountNumber: "0123456789",
+      bankCode: "044",
+      reference: "txn_true_2",
+      nameEnquiryReference: "name_ref_true_2"
+    })).resolves.toMatchObject({
+      providerReference: "STW_TRUE_2",
+      status: "successful"
+    });
+  });
+
   it("normalizes alternate Strowallet name-enquiry reference keys", async () => {
     const service = new StrowalletService(config({ STROWALLET_PUBLIC_KEY: "pk_test" }), {} as never);
     jest.spyOn((service as never) as { request: jest.Mock }, "request").mockResolvedValue({
