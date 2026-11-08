@@ -29,6 +29,7 @@ export class RolesGuard implements CanActivate {
     if (/\/admin\/support(?:\/|$)/.test(url)) return write ? "support.reply" : "support.view";
     if (/\/admin\/notifications(?:\/|$)/.test(url)) return write ? "notifications.send" : "notifications.view";
     if (/\/admin\/(?:kyc-records)(?:\/|$)/.test(url)) return write ? "kyc.manage" : "kyc.view";
+    if (/\/admin\/cash-drop\/kyc-liveness(?:\/|$)/.test(url)) return write ? "kyc.manage" : "kyc.view";
     if (/\/admin\/(?:transactions|transfers|gift-cards)(?:\/|$)/.test(url)) return write ? "transactions.manage" : "transactions.view";
     if (/\/admin\/(?:dva)(?:\/|$)/.test(url) || /\/admin\/users\/[^/]+\/wallet(?:\/|$)/.test(url)) return write ? "wallets.manage" : "wallets.view";
     if (/\/admin\/fees(?:\/|$)/.test(url)) return write ? "fees.manage" : "fees.view";

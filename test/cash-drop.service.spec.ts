@@ -25,7 +25,14 @@ describe("CashDropService", () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findMany: jest.fn().mockResolvedValue(overrides.profiles ?? [])
       },
-      auditLog: { create: jest.fn() }
+      appSetting: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn().mockImplementation(({ create, update }) => Promise.resolve({
+          ...(create ?? update),
+          updatedAt: new Date("2026-11-08T18:00:00.000Z")
+        }))
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) }
     };
     const fingerprint = {
       fingerprintFromImageUrl: jest.fn().mockResolvedValue({ fingerprint: "11110000", fingerprintHash: "hash_1" }),
@@ -100,9 +107,29 @@ describe("CashDropService", () => {
     expect(service.getSelfieCountdownSeconds()).toBe(10);
   });
 
-  it("switches registration selfie mode through environment configuration", () => {
-    expect(createService({ config: { KYC_SELFIE_MODE: "static" } }).service.getKycSelfieMode()).toBe("static");
-    expect(createService({ config: { KYC_SELFIE_MODE: "bytid_liveness" } }).service.getKycSelfieMode()).toBe("bytid_liveness");
+  it("switches registration selfie mode through environment configuration", async () => {
+    await expect(createService({ config: { KYC_SELFIE_MODE: "static" } }).service.getKycSelfieMode()).resolves.toBe("static");
+    await expect(createService({ config: { KYC_SELFIE_MODE: "bytid_liveness" } }).service.getKycSelfieMode()).resolves.toBe("bytid_liveness");
+  });
+
+  it("persists and audits the admin liveness toggle without disabling face matching", async () => {
+    const { service, prisma } = createService({ config: { KYC_SELFIE_MODE: "bytid_liveness" } });
+
+    await expect(service.updateKycLiveness("admin_1", false)).resolves.toMatchObject({
+      enabled: false,
+      mode: "static",
+      source: "admin"
+    });
+    expect(prisma.appSetting.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { key: "kyc.bytid_liveness_enabled" },
+      create: expect.objectContaining({ value: "false", updatedById: "admin_1" })
+    }));
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: "KYC_LIVENESS_SETTING_UPDATED",
+        metadata: expect.objectContaining({ enabled: false, faceMatchRequired: true })
+      })
+    });
   });
 
   it("resolves a confident image match to receiver payment details", async () => {

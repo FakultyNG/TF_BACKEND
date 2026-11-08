@@ -305,7 +305,7 @@ BytID selfie KYC implementation:
 - The selfie request does not accept another BVN. The backend reads the original BVN from the short-lived registration/KYC Redis session using `kycReference`, sends that same BVN with the selfie to BytID, then removes the plain BVN after a successful face match or normal session expiry.
 - TF backend sends the BVN number, the selfie image, and the first name, last name, and date of birth already returned by the BVN verification step. The app must not ask the user to re-enter those identity fields.
 - Each selfie attempt uses a new BytID `reference` derived from the internal `kycReference`. This prevents a retry from being rejected as `duplicate_reference`; the public `kycReference` does not change.
-- To enable the camera/selfie step, set `KYC_SELFIE_REQUIRED=true` and configure `BYTID_API_KEY`.
+- The camera face shot and BVN-image face match are always required. Configure `BYTID_API_KEY` for both static and liveness-backed matching.
 - Configure BytID dashboard webhooks to `POST {PUBLIC_API_BASE_URL}/api/v1/webhooks/bytid`. TF verifies `Bytid-Signature` with `BYTID_WEBHOOK_SECRET`, logs the event, deduplicates `Bytid-Event-Id`, and updates matched KYC records from `verification.completed` / `kyc.completed` events.
 
 Prembly server-side implementation:
@@ -361,7 +361,7 @@ TF backend cleans the base64 image and calls the KYC provider.
 
 The frontend must not call Prembly or any provider directly.
 
-When `KYC_SELFIE_REQUIRED=false`, the frontend should skip this camera step after BVN success and continue to registration completion/PIN creation. The app can read the public feature config at `GET /cash-drop/config`.
+The frontend must never skip the camera step after BVN success. It reads the public feature config at `GET /cash-drop/config`: `kycSelfieMode=static` performs a direct face-shot-to-BVN-image match, while `kycSelfieMode=bytid_liveness` performs BytID liveness before the BVN face match.
 
 If face matching returns `faceMatch=false`, the temporary registration session
 retains the already-verified BVN until its normal TTL expires. The frontend may
@@ -2164,7 +2164,7 @@ This endpoint is public and is used by the mobile app before opening CashDrop or
   "message": "CashDrop config fetched successfully",
   "data": {
     "featureEnabled": false,
-    "kycSelfieRequired": false,
+    "kycSelfieRequired": true,
     "kycSelfieMode": "bytid_liveness",
     "selfieCountdownEnabled": true,
     "selfieCountdownSeconds": 5
@@ -2174,10 +2174,19 @@ This endpoint is public and is used by the mobile app before opening CashDrop or
 
 Frontend behavior:
 - if `featureEnabled=false`, hide or disable CashDrop camera actions and do not call `/cash-drop/register` or `/cash-drop/resolve`.
-- if `kycSelfieRequired=false`, skip the registration selfie camera step after BVN verification.
+- `kycSelfieRequired` is always `true`; registration cannot bypass the face-shot/BVN-image match.
 - `kycSelfieMode=bytid_liveness` uses the hosted live check; `static` uses the existing image face-match endpoint.
 - if `selfieCountdownEnabled=true`, show the configured countdown before automatic capture. `selfieCountdownSeconds` is clamped by the backend to 1–10 seconds.
 - `KYC_SELFIE_COUNTDOWN_ENABLED` defaults to `true`; `KYC_SELFIE_COUNTDOWN_SECONDS` defaults to `5`.
+
+Authorized admins with KYC management permission control the additional liveness step through:
+
+- `GET /admin/cash-drop/kyc-liveness`
+- `PATCH /admin/cash-drop/kyc-liveness` with `{ "enabled": true | false }`
+
+The setting is persisted and audited. When no admin setting exists, `KYC_SELFIE_MODE`
+provides the initial default. Disabling liveness selects `static`; it never disables
+the required BVN face match.
 
 ---
 

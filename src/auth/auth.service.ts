@@ -147,7 +147,7 @@ export class AuthService {
   async startRegistrationLiveness(registrationToken: string, kycReference: string) {
     const { session, ttl } = await this.getRegistrationSession(registrationToken);
     const current = this.requireRegistrationKyc(session, kycReference);
-    if (this.cashDropService.getKycSelfieMode() !== "bytid_liveness") {
+    if (await this.cashDropService.getKycSelfieMode() !== "bytid_liveness") {
       throw new ApiException("BytID liveness is not enabled", "KYC_LIVENESS_NOT_ENABLED", HttpStatus.CONFLICT);
     }
     if (!this.selfieKycProvider.createLivenessSession) {
@@ -667,7 +667,7 @@ export class AuthService {
   }
 
   private isSelfieKycRequired() {
-    return ["1", "true", "yes", "on"].includes(this.config.get<string>("KYC_SELFIE_REQUIRED", "true").toLowerCase());
+    return this.cashDropService.isKycSelfieRequired();
   }
 
   private requireRegistrationKyc(session: RegistrationSession, kycReference: string) {

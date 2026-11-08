@@ -1,7 +1,7 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import {
   Bell, ChevronDown, LayoutDashboard, LogOut, Menu, MessageCircle,
-  ReceiptText, ShieldCheck, Users, X
+  ReceiptText, ScanFace, ShieldCheck, Users, X
 } from "lucide-react";
 import { api, authStore, displayName } from "./api";
 import type { Admin } from "./types";
@@ -11,12 +11,13 @@ import TransactionsPage from "./pages/TransactionsPage";
 import SupportPage from "./pages/SupportPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import TeamPage from "./pages/TeamPage";
+import KycSettingsPage from "./pages/KycSettingsPage";
 
-type Section = "dashboard" | "users" | "transactions" | "support" | "notifications" | "team";
+type Section = "dashboard" | "users" | "transactions" | "support" | "notifications" | "kyc-settings" | "team";
 
 const sectionFromHash = (): Section => {
   const value = location.hash.replace("#", "") as Section;
-  return ["dashboard", "users", "transactions", "support", "notifications", "team"].includes(value) ? value : "dashboard";
+  return ["dashboard", "users", "transactions", "support", "notifications", "kyc-settings", "team"].includes(value) ? value : "dashboard";
 };
 
 export default function App() {
@@ -99,6 +100,7 @@ function Shell({ admin, onLogout }: { admin: Admin; onLogout: () => void }) {
     { id: "transactions" as Section, label: "Transactions", icon: ReceiptText, permission: "transactions.view" },
     { id: "support" as Section, label: "Messages", icon: MessageCircle, permission: "support.view" },
     { id: "notifications" as Section, label: "Broadcasts", icon: Bell, permission: "notifications.view" },
+    { id: "kyc-settings" as Section, label: "KYC settings", icon: ScanFace, permission: "kyc.manage" },
     { id: "team" as Section, label: "Admin team", icon: ShieldCheck, permission: "admins.manage" }
   ].filter((item) => can(item.permission)), [admin.role, permissions.join("|")]);
 
@@ -116,6 +118,7 @@ function Shell({ admin, onLogout }: { admin: Admin; onLogout: () => void }) {
     transactions: <TransactionsPage />,
     support: <SupportPage canReply={can("support.reply")} />,
     notifications: <NotificationsPage canSend={can("notifications.send")} />,
+    "kyc-settings": <KycSettingsPage />,
     team: <TeamPage />
   };
   const title = items.find((item) => item.id === section)?.label ?? "Overview";

@@ -9,6 +9,8 @@ import { CashDropFingerprintService } from "./cash-drop-fingerprint.service";
 
 @Injectable()
 export class CashDropService {
+  private readonly kycLivenessSettingKey = "kyc.bytid_liveness_enabled";
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly fingerprintService: CashDropFingerprintService,
@@ -21,7 +23,7 @@ export class CashDropService {
   }
 
   isKycSelfieRequired() {
-    return ["1", "true", "yes", "on"].includes(this.config.get<string>("KYC_SELFIE_REQUIRED", "true").toLowerCase());
+    return true;
   }
 
   isSelfieCountdownEnabled() {
@@ -30,9 +32,55 @@ export class CashDropService {
     );
   }
 
-  getKycSelfieMode() {
-    const mode = this.config.get<string>("KYC_SELFIE_MODE", "bytid_liveness").trim().toLowerCase();
-    return mode === "static" ? "static" : "bytid_liveness";
+  async getKycSelfieMode() {
+    return (await this.getKycLivenessConfig()).mode;
+  }
+
+  async getKycLivenessConfig() {
+    const setting = await this.prisma.appSetting.findUnique({ where: { key: this.kycLivenessSettingKey } });
+    const environmentEnabled = this.config.get<string>("KYC_SELFIE_MODE", "bytid_liveness").trim().toLowerCase() !== "static";
+    const enabled = setting ? setting.value === "true" : environmentEnabled;
+    return {
+      enabled,
+      mode: enabled ? "bytid_liveness" as const : "static" as const,
+      source: setting ? "admin" as const : "environment" as const,
+      updatedAt: setting?.updatedAt ?? null,
+      updatedById: setting?.updatedById ?? null
+    };
+  }
+
+  async updateKycLiveness(adminId: string, enabled: boolean) {
+    const setting = await this.prisma.appSetting.upsert({
+      where: { key: this.kycLivenessSettingKey },
+      create: {
+        key: this.kycLivenessSettingKey,
+        value: String(enabled),
+        description: "Require BytID liveness before matching a registration face shot with the BVN image",
+        updatedById: adminId
+      },
+      update: { value: String(enabled), updatedById: adminId }
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        actorId: adminId,
+        actorType: "admin",
+        action: "KYC_LIVENESS_SETTING_UPDATED",
+        entityType: "AppSetting",
+        entityId: this.kycLivenessSettingKey,
+        metadata: {
+          enabled,
+          mode: enabled ? "bytid_liveness" : "static",
+          faceMatchRequired: true
+        }
+      }
+    });
+    return {
+      enabled,
+      mode: enabled ? "bytid_liveness" as const : "static" as const,
+      source: "admin" as const,
+      updatedAt: setting.updatedAt,
+      updatedById: setting.updatedById
+    };
   }
 
   getSelfieCountdownSeconds() {

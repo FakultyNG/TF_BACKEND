@@ -15,11 +15,12 @@ export class CashDropController {
   constructor(private readonly cashDropService: CashDropService) {}
 
   @Get("config")
-  config() {
+  async config() {
+    const kycLiveness = await this.cashDropService.getKycLivenessConfig();
     return success("CashDrop config fetched successfully", {
       featureEnabled: this.cashDropService.isEnabled(),
       kycSelfieRequired: this.cashDropService.isKycSelfieRequired(),
-      kycSelfieMode: this.cashDropService.getKycSelfieMode(),
+      kycSelfieMode: kycLiveness.mode,
       selfieCountdownEnabled: this.cashDropService.isSelfieCountdownEnabled(),
       selfieCountdownSeconds: this.cashDropService.getSelfieCountdownSeconds()
     });

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import { AdminJwtAuthGuard } from "../auth/guards/admin-jwt-auth.guard";
@@ -9,6 +9,7 @@ import { Roles } from "../common/decorators/roles.decorator";
 import { AdminCashDropQueryDto } from "./dto/admin-cash-drop-query.dto";
 import { DisableCashDropDto } from "./dto/disable-cash-drop.dto";
 import { CashDropService } from "./cash-drop.service";
+import { UpdateKycLivenessDto } from "./dto/update-kyc-liveness.dto";
 
 @ApiTags("Admin CashDrop")
 @ApiBearerAuth()
@@ -17,6 +18,19 @@ import { CashDropService } from "./cash-drop.service";
 @Controller("admin/cash-drop")
 export class AdminCashDropController {
   constructor(private readonly cashDropService: CashDropService) {}
+
+  @Roles(UserRole.ADMIN, UserRole.COMPLIANCE, UserRole.SUPER_ADMIN)
+  @Get("kyc-liveness")
+  async kycLiveness() {
+    return success("KYC liveness setting fetched successfully", await this.cashDropService.getKycLivenessConfig());
+  }
+
+  @Roles(UserRole.ADMIN, UserRole.COMPLIANCE, UserRole.SUPER_ADMIN)
+  @Patch("kyc-liveness")
+  async updateKycLiveness(@CurrentUser() admin: { sub: string }, @Body() dto: UpdateKycLivenessDto) {
+    const data = await this.cashDropService.updateKycLiveness(admin.sub, dto.enabled);
+    return success("KYC liveness setting updated successfully", data);
+  }
 
   @Get("profiles")
   async list(@Query() query: AdminCashDropQueryDto) {
